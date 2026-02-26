@@ -73,8 +73,10 @@ Runs the LVGL UI natively on macOS/Linux via SDL2. Requires `sdl2` and `cmake`.
 brew install sdl2                    # macOS, one-time
 cmake -B build -S sim               # configure
 cmake --build build -j$(nproc)      # build
-./build/sim                          # run
+pkill -f "./build/sim" 2>/dev/null; sleep 0.3; ./build/sim &   # run
 ```
+
+**Important:** Always launch from the project root (`radio/`). The simulator resolves asset paths (`A:assets/logos/...`) relative to the working directory. Using `open` or launching from `build/` will break image loading.
 
 | Key         | Action              |
 | ----------- | ------------------- |

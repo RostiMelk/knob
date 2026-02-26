@@ -30,6 +30,9 @@ enum class Mode { Volume, Browse };
 
 static constexpr int BROWSE_TIMEOUT_MS = 7000;
 static constexpr int VOL_DISPLAY_MS = 1500;
+static constexpr int ANIM_FADE_MS = 280;
+static constexpr int ANIM_QUICK_MS = 120;
+static constexpr int ANIM_ARC_FADE_MS = 600;
 
 // ─── Palette ────────────────────────────────────────────────────────────────
 
@@ -147,9 +150,46 @@ static void show_idle_ui(bool idle);
 static void do_tap();
 static void do_long_press();
 
+// ─── Animation Helpers ──────────────────────────────────────────────────────
+
+static void anim_opa_cb(void *obj, int32_t v) {
+  lv_obj_set_style_opa(static_cast<lv_obj_t *>(obj), v, LV_PART_MAIN);
+}
+
+static void anim_img_opa_cb(void *obj, int32_t v) {
+  lv_obj_set_style_image_opa(static_cast<lv_obj_t *>(obj), v, LV_PART_MAIN);
+}
+
+static void anim_arc_ind_opa_cb(void *obj, int32_t v) {
+  lv_obj_set_style_arc_opa(static_cast<lv_obj_t *>(obj), v, LV_PART_INDICATOR);
+}
+
+static void anim_hide_done(lv_anim_t *a) {
+  lv_obj_add_flag(static_cast<lv_obj_t *>(a->var), LV_OBJ_FLAG_HIDDEN);
+}
+
+static void anim_fade(lv_obj_t *obj, lv_anim_exec_xcb_t exec_cb, int32_t start,
+                      int32_t end, int duration,
+                      void (*done_cb)(lv_anim_t *) = nullptr) {
+  lv_anim_t a;
+  lv_anim_init(&a);
+  lv_anim_set_var(&a, obj);
+  lv_anim_set_exec_cb(&a, exec_cb);
+  lv_anim_set_values(&a, start, end);
+  lv_anim_set_duration(&a, duration);
+  lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
+  if (done_cb)
+    lv_anim_set_completed_cb(&a, done_cb);
+  lv_anim_start(&a);
+}
+
 // ─── Volume Arc ─────────────────────────────────────────────────────────────
 
-static void on_vol_hide(lv_timer_t *) {}
+static void on_vol_hide(lv_timer_t *) {
+  anim_fade(s_vol_arc, anim_arc_ind_opa_cb, LV_OPA_COVER, LV_OPA_30,
+            ANIM_ARC_FADE_MS);
+  lv_timer_pause(s_vol_hide_timer);
+}
 
 // ─── Clock ──────────────────────────────────────────────────────────────────
 
@@ -164,29 +204,76 @@ static void update_clock() {
 static void on_clock_tick(lv_timer_t *) { update_clock(); }
 
 static void show_idle_ui(bool idle) {
+  lv_anim_delete(s_lbl_clock, anim_opa_cb);
+  lv_anim_delete(s_logo_container, anim_opa_cb);
+  lv_anim_delete(s_lbl_station, anim_opa_cb);
+  lv_anim_delete(s_lbl_speaker, anim_opa_cb);
+  lv_anim_delete(s_lbl_subtitle, anim_opa_cb);
+  lv_anim_delete(s_bg_img, anim_img_opa_cb);
+
   if (idle) {
     update_clock();
+
     lv_obj_remove_flag(s_lbl_clock, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(s_logo_container, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(s_lbl_station, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(s_lbl_speaker, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_set_style_image_opa(s_bg_img, LV_OPA_30, LV_PART_MAIN);
+    lv_obj_set_style_opa(s_lbl_clock, LV_OPA_TRANSP, LV_PART_MAIN);
+    anim_fade(s_lbl_clock, anim_opa_cb, LV_OPA_TRANSP, LV_OPA_90, ANIM_FADE_MS);
+
+    int32_t logo_opa = lv_obj_get_style_opa(s_logo_container, LV_PART_MAIN);
+    anim_fade(s_logo_container, anim_opa_cb, logo_opa, LV_OPA_TRANSP,
+              ANIM_FADE_MS, anim_hide_done);
+    anim_fade(s_lbl_station, anim_opa_cb, LV_OPA_COVER, LV_OPA_TRANSP,
+              ANIM_FADE_MS, anim_hide_done);
+    anim_fade(s_lbl_speaker, anim_opa_cb, LV_OPA_60, LV_OPA_TRANSP,
+              ANIM_FADE_MS, anim_hide_done);
+
+    anim_fade(s_bg_img, anim_img_opa_cb,
+              lv_obj_get_style_image_opa(s_bg_img, LV_PART_MAIN), LV_OPA_30,
+              ANIM_FADE_MS);
+
     lv_obj_set_style_bg_color(s_screen, lv_color_black(), LV_PART_MAIN);
+
+    lv_obj_set_style_opa(s_lbl_subtitle, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_align(s_lbl_subtitle, LV_ALIGN_CENTER, 0, 30);
+    anim_fade(s_lbl_subtitle, anim_opa_cb, LV_OPA_TRANSP, LV_OPA_COVER,
+              ANIM_FADE_MS);
+
     lv_timer_resume(s_clock_timer);
   } else {
-    lv_obj_add_flag(s_lbl_clock, LV_OBJ_FLAG_HIDDEN);
+    anim_fade(s_lbl_clock, anim_opa_cb,
+              lv_obj_get_style_opa(s_lbl_clock, LV_PART_MAIN), LV_OPA_TRANSP,
+              ANIM_QUICK_MS, anim_hide_done);
+
     lv_obj_remove_flag(s_logo_container, LV_OBJ_FLAG_HIDDEN);
     lv_obj_remove_flag(s_lbl_station, LV_OBJ_FLAG_HIDDEN);
     lv_obj_remove_flag(s_lbl_speaker, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_set_style_image_opa(s_bg_img, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_opa(s_logo_container, LV_OPA_COVER, LV_PART_MAIN);
+
+    lv_obj_set_style_opa(s_logo_container, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_opa(s_lbl_station, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_opa(s_lbl_speaker, LV_OPA_TRANSP, LV_PART_MAIN);
+
+    anim_fade(s_logo_container, anim_opa_cb, LV_OPA_TRANSP, LV_OPA_COVER,
+              ANIM_FADE_MS);
+    anim_fade(s_lbl_station, anim_opa_cb, LV_OPA_TRANSP, LV_OPA_COVER,
+              ANIM_FADE_MS);
+    anim_fade(s_lbl_speaker, anim_opa_cb, LV_OPA_TRANSP, LV_OPA_60,
+              ANIM_FADE_MS);
+
+    anim_fade(s_bg_img, anim_img_opa_cb,
+              lv_obj_get_style_image_opa(s_bg_img, LV_PART_MAIN), LV_OPA_COVER,
+              ANIM_FADE_MS);
+
+    lv_obj_set_style_opa(s_lbl_subtitle, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_align(s_lbl_subtitle, LV_ALIGN_CENTER, 0, 94);
+    anim_fade(s_lbl_subtitle, anim_opa_cb, LV_OPA_TRANSP, LV_OPA_COVER,
+              ANIM_FADE_MS);
+
     lv_timer_pause(s_clock_timer);
   }
 }
 
 static void show_volume(int level) {
+  lv_anim_delete(s_vol_arc, anim_arc_ind_opa_cb);
+  lv_obj_set_style_arc_opa(s_vol_arc, LV_OPA_COVER, LV_PART_INDICATOR);
   lv_arc_set_value(s_vol_arc, level);
   lv_obj_set_style_arc_color(s_vol_arc, COL_ARC_ACTIVE, LV_PART_INDICATOR);
   lv_timer_reset(s_vol_hide_timer);
@@ -202,7 +289,10 @@ static void enter_browse() {
 
   lv_obj_set_style_text_color(s_lbl_station, COL_TEXT, LV_PART_MAIN);
   show_idle_ui(false);
-  lv_obj_set_style_opa(s_logo_container, LV_OPA_70, LV_PART_MAIN);
+
+  lv_anim_delete(s_logo_container, anim_opa_cb);
+  anim_fade(s_logo_container, anim_opa_cb, LV_OPA_TRANSP, LV_OPA_70,
+            ANIM_FADE_MS);
 
   lv_label_set_text(s_lbl_subtitle, "Tap to play");
   lv_obj_set_style_text_color(s_lbl_subtitle, lv_color_hex(0xBBBBBB),
@@ -212,6 +302,9 @@ static void enter_browse() {
   snprintf(pos, sizeof(pos), "%d / %d", s_browse_index + 1, STATION_COUNT);
   lv_label_set_text(s_lbl_position, pos);
   lv_obj_remove_flag(s_lbl_position, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_style_opa(s_lbl_position, LV_OPA_TRANSP, LV_PART_MAIN);
+  anim_fade(s_lbl_position, anim_opa_cb, LV_OPA_TRANSP, LV_OPA_COVER,
+            ANIM_QUICK_MS);
 
   lv_obj_set_style_arc_color(s_vol_arc, COL_ARC_DIM, LV_PART_INDICATOR);
   lv_obj_set_style_arc_color(s_vol_arc, COL_ARC_BG, LV_PART_MAIN);
@@ -225,15 +318,25 @@ static void exit_browse() {
   s_mode = Mode::Volume;
 
   lv_obj_set_style_text_color(s_lbl_station, COL_TEXT, LV_PART_MAIN);
-  lv_obj_set_style_opa(s_logo_container, LV_OPA_COVER, LV_PART_MAIN);
 
   lv_label_set_text(s_lbl_station, STATIONS[s_station_index].name);
   set_logo(s_station_index);
   update_subtitle();
   show_idle_ui(!s_was_playing);
+
+  if (s_was_playing) {
+    lv_anim_delete(s_logo_container, anim_opa_cb);
+    anim_fade(s_logo_container, anim_opa_cb, LV_OPA_70, LV_OPA_COVER,
+              ANIM_FADE_MS);
+  }
+
   lv_obj_set_style_text_color(s_lbl_subtitle, lv_color_hex(0x9A9A9A),
                               LV_PART_MAIN);
-  lv_obj_add_flag(s_lbl_position, LV_OBJ_FLAG_HIDDEN);
+
+  lv_anim_delete(s_lbl_position, anim_opa_cb);
+  anim_fade(s_lbl_position, anim_opa_cb,
+            lv_obj_get_style_opa(s_lbl_position, LV_PART_MAIN), LV_OPA_TRANSP,
+            ANIM_QUICK_MS, anim_hide_done);
 
   lv_obj_set_style_arc_color(s_vol_arc, COL_ARC_ACTIVE, LV_PART_INDICATOR);
   lv_obj_set_style_arc_color(s_vol_arc, COL_ARC_BG, LV_PART_MAIN);
@@ -671,6 +774,16 @@ void ui_on_encoder_rotate(int32_t steps) {
         ((new_idx % STATION_COUNT) + STATION_COUNT) % STATION_COUNT;
     lv_label_set_text(s_lbl_station, STATIONS[s_browse_index].name);
     set_logo(s_browse_index);
+
+    lv_anim_delete(s_lbl_station, anim_opa_cb);
+    lv_obj_set_style_opa(s_lbl_station, LV_OPA_TRANSP, LV_PART_MAIN);
+    anim_fade(s_lbl_station, anim_opa_cb, LV_OPA_TRANSP, LV_OPA_COVER,
+              ANIM_QUICK_MS);
+
+    lv_anim_delete(s_logo_container, anim_opa_cb);
+    lv_obj_set_style_opa(s_logo_container, LV_OPA_TRANSP, LV_PART_MAIN);
+    anim_fade(s_logo_container, anim_opa_cb, LV_OPA_TRANSP, LV_OPA_70,
+              ANIM_QUICK_MS);
 
     char pos[16];
     snprintf(pos, sizeof(pos), "%d / %d", s_browse_index + 1, STATION_COUNT);
