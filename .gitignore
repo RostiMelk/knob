@@ -1,0 +1,16 @@
+build/
+sim/build/
+.env
+sdkconfig
+sdkconfig.old
+managed_components/
+dependencies.lock
+__pycache__/
+*.pyc
+.vscode/
+.cache/
+*.o
+*.d
+*.map
+*.bin
+*.elf
