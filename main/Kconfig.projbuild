@@ -30,7 +30,7 @@ menu "Sonos Radio"
 
     config RADIO_VOLUME_DEFAULT
         int "Default volume (0-100)"
-        default 20
+        default 33
         range 0 100
 
 endmenu

@@ -3,8 +3,9 @@
 
 #define LV_USE_DEV_VERSION
 
-/* Color depth: 16 = RGB565 to match hardware */
-#define LV_COLOR_DEPTH 16
+/* Color depth: 32 = ARGB8888 for smooth gradients in simulator.
+ * Hardware uses RGB565 but at 200 PPI banding is invisible. */
+#define LV_COLOR_DEPTH 32
 
 /* Memory */
 #define LV_MEM_CUSTOM 0

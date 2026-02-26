@@ -37,8 +37,8 @@ static constexpr int VOL_DISPLAY_MS = 1500;
 #define COL_TEXT_SEC lv_color_hex(0x8E8E93)
 #define COL_ACCENT lv_color_hex(0x0A84FF)
 #define COL_ARC_BG lv_color_hex(0x1C1C1E)
-#define COL_ARC_ACTIVE lv_color_hex(0x0A84FF)
-#define COL_ARC_DIM lv_color_hex(0x2C2C2E)
+#define COL_ARC_ACTIVE lv_color_hex(0xFFFFFF)
+#define COL_ARC_DIM lv_color_hex(0x555555)
 #define COL_GREEN lv_color_hex(0x30D158)
 #define COL_ORANGE lv_color_hex(0xFF9F0A)
 #define COL_RED lv_color_hex(0xFF453A)
@@ -265,7 +265,7 @@ static void build_main_screen() {
   lv_arc_set_rotation(s_vol_arc, 135);
   lv_arc_set_bg_angles(s_vol_arc, 0, 270);
   lv_arc_set_range(s_vol_arc, VOLUME_MIN, VOLUME_MAX);
-  lv_arc_set_value(s_vol_arc, 20);
+  lv_arc_set_value(s_vol_arc, s_volume);
   lv_obj_remove_flag(s_vol_arc, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_set_style_arc_width(s_vol_arc, 6, LV_PART_MAIN);
   lv_obj_set_style_arc_color(s_vol_arc, COL_ARC_BG, LV_PART_MAIN);
@@ -457,6 +457,8 @@ void ui_init() {
   lv_display_t *disp = nullptr;
   lv_indev_t *touch = nullptr;
   display_init(&disp, &touch);
+
+  s_volume = settings_get_volume();
 
   if (display_lock(200)) {
     build_main_screen();

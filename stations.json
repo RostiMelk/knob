@@ -1,0 +1,79 @@
+[
+  {
+    "id": "nrk_p1",
+    "name": "NRK P1 Oslo",
+    "stream_url": "https://cdn0-47115-liveicecast0.dna.contentdelivery.net/p1_mp3_h",
+    "logo_url": "https://reelworld.com/assets/images/marketing/jingles/nrk-p1-2025/tile.png",
+    "color": "0x1A1A2E"
+  },
+  {
+    "id": "nrk_p2",
+    "name": "NRK P2",
+    "stream_url": "https://cdn0-47115-liveicecast0.dna.contentdelivery.net/p2_aac_h",
+    "logo_url": "https://gfx.nrk.no/5VaLs0WhIk0uXKlgrkOcfgyGUguXjONPmr2WpMEdkJjg",
+    "color": "0x16213E"
+  },
+  {
+    "id": "nrk_p3",
+    "name": "NRK P3",
+    "stream_url": "https://cdn0-47115-liveicecast0.dna.contentdelivery.net/p3_mp3_h",
+    "logo_url": "https://info.nrk.no/wp-content/uploads/2019/09/NRKP3-hovedlogo_c_RGB.jpg",
+    "color": "0x0F3460"
+  },
+  {
+    "id": "nrk_mp3",
+    "name": "NRK MP3",
+    "stream_url": "https://cdn0-47115-liveicecast0.dna.contentdelivery.net/mp3_mp3_h",
+    "logo_url": "https://upload.wikimedia.org/wikipedia/commons/a/a7/Logo_of_NRK_mP3.png",
+    "color": "0x1A2A4A"
+  },
+  {
+    "id": "nrk_jazz",
+    "name": "NRK Jazz",
+    "stream_url": "http://cdn0-47115-liveicecast0.dna.contentdelivery.net/jazz_mp3_h",
+    "logo_url": "https://i.imgur.com/vHp1XjT.png",
+    "color": "0x2D1B69"
+  },
+  {
+    "id": "p4",
+    "name": "P4 Norge",
+    "stream_url": "https://p4.p4groupaudio.com/P04_MM",
+    "logo_url": "https://ddjh0q34m0xak.cloudfront.net/mmo/ncl/6e2f9c96-a018-424a-b3bf-7be5252d806c.png?w=600&ar=1x1",
+    "color": "0x8B1A1A"
+  },
+  {
+    "id": "p5",
+    "name": "P5 Hits",
+    "stream_url": "https://p5.p4groupaudio.com/P05_MM",
+    "logo_url": "https://ddjh0q34m0xak.cloudfront.net/mmo/ncl/996f007d-9d5a-4b56-9d3b-ac0d6724599d.png?w=600&ar=1x1",
+    "color": "0x1A5C2E"
+  },
+  {
+    "id": "p9",
+    "name": "P9 Retro",
+    "stream_url": "https://p9.p4groupaudio.com/P09_MH",
+    "logo_url": "https://ddjh0q34m0xak.cloudfront.net/mmo/ncl/258ff588-4e23-49af-88e1-b0b2afedaa4a.png?w=600&ar=1x1",
+    "color": "0x6B3A1A"
+  },
+  {
+    "id": "radio_rock",
+    "name": "Radio Rock",
+    "stream_url": "https://live-bauerno.sharp-stream.com/radiorock_no_mp3",
+    "logo_url": "https://play-lh.googleusercontent.com/fYQvCLhcxO1HUgQ1KCryYUKqMe8Q0O5c5NKAByP_vFj7wchAV-RJh8oWrIKL4581kCA=w200",
+    "color": "0x5C1010"
+  },
+  {
+    "id": "radio_norge",
+    "name": "Radio Norge",
+    "stream_url": "https://live-bauerno.sharp-stream.com/radionorge_no_mp3",
+    "logo_url": "https://static.mytuner.mobi/media/tvos_radios/168/radio-norge.7b8f564e.png",
+    "color": "0x1A3A5C"
+  },
+  {
+    "id": "nrj",
+    "name": "NRJ Norge",
+    "stream_url": "https://live-bauerno.sharp-stream.com/kiss_no_mp3",
+    "logo_url": "https://media.bauerradio.com/image/upload/c_crop,g_custom/w_200/v1733412560/brand_manager/stations/op6xarklazczsrwxi2ga.png",
+    "color": "0x5C1A3A"
+  }
+]

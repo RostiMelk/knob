@@ -9,7 +9,7 @@ static char _wifi_ssid[33] = "SimNetwork";
 static char _wifi_pass[65] = "SimPass";
 static char _speaker_ip[40] = "";
 static char _speaker_name[64] = "";
-static int _volume = 20;
+static int _volume = 33;
 static int _station = 0;
 
 inline void settings_init() {}
