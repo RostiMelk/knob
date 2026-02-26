@@ -28,6 +28,9 @@ static int sdl_event_watch(void *, SDL_Event *event) {
     case SDLK_SPACE:
       ui_on_touch_tap();
       break;
+    case SDLK_l:
+      ui_on_touch_long_press();
+      break;
     case SDLK_q:
     case SDLK_ESCAPE:
       s_running = false;
@@ -52,7 +55,7 @@ int main(int, char **) {
 
   ui_set_wifi_status(true);
   ui_set_speaker_name("Living Room");
-  ui_set_play_state(PlayState::Playing);
+  ui_set_play_state(PlayState::Stopped);
 
   SDL_AddEventWatch(sdl_event_watch, nullptr);
 
@@ -60,8 +63,9 @@ int main(int, char **) {
   printf("  Sonos Radio Simulator (360x360)\n");
   printf("──────────────────────────────────────\n");
   printf("  Up/Down     Encoder rotate\n");
-  printf("  Enter/Space Touch tap\n");
-  printf("  Mouse click Touch tap\n");
+  printf("  Enter/Space Tap (play / browse / select)\n");
+  printf("  L           Long press (stop)\n");
+  printf("  Mouse click Tap\n");
   printf("  Scroll      Encoder rotate\n");
   printf("  Q/Esc       Quit\n");
   printf("──────────────────────────────────────\n");

@@ -16,3 +16,4 @@ void ui_show_scanning();
 
 void ui_on_encoder_rotate(int32_t steps);
 void ui_on_touch_tap();
+void ui_on_touch_long_press();

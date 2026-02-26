@@ -97,23 +97,14 @@ constexpr Station STATIONS[] = {
     {"NRK Jazz",
      "http://cdn0-47115-liveicecast0.dna.contentdelivery.net/jazz_mp3_h",
      "nrk_jazz.png", 0x2D1B69},
-    {"P4 Norge",
-     "https://p4.p4groupaudio.com/P04_MM",
-     "p4.png", 0x8B1A1A},
-    {"P5 Hits",
-     "https://p5.p4groupaudio.com/P05_MM",
-     "p5.png", 0x1A5C2E},
-    {"P9 Retro",
-     "https://p9.p4groupaudio.com/P09_MH",
-     "p9.png", 0x6B3A1A},
-    {"Radio Rock",
-     "https://live-bauerno.sharp-stream.com/radiorock_no_mp3",
+    {"P4 Norge", "https://p4.p4groupaudio.com/P04_MM", "p4.png", 0x8B1A1A},
+    {"P5 Hits", "https://p5.p4groupaudio.com/P05_MM", "p5.png", 0x1A5C2E},
+    {"P9 Retro", "https://p9.p4groupaudio.com/P09_MH", "p9.png", 0x6B3A1A},
+    {"Radio Rock", "https://live-bauerno.sharp-stream.com/radiorock_no_mp3",
      "radio_rock.png", 0x5C1010},
-    {"Radio Norge",
-     "https://live-bauerno.sharp-stream.com/radionorge_no_mp3",
+    {"Radio Norge", "https://live-bauerno.sharp-stream.com/radionorge_no_mp3",
      "radio_norge.png", 0x1A3A5C},
-    {"NRJ Norge",
-     "https://live-bauerno.sharp-stream.com/kiss_no_mp3",
+    {"NRJ Norge", "https://live-bauerno.sharp-stream.com/kiss_no_mp3",
      "nrj.png", 0x5C1A3A},
 };
 
@@ -129,6 +120,8 @@ enum : int32_t {
   APP_EVENT_ENCODER_ROTATE,     // data: int32_t delta (+/- steps)
   APP_EVENT_STATION_CHANGED,    // data: int32_t station index
   APP_EVENT_VOLUME_CHANGED,     // data: int32_t new volume 0–100
+  APP_EVENT_PLAY_REQUESTED,     // user wants to start playing current station
+  APP_EVENT_STOP_REQUESTED,     // user wants to stop and release speaker
   APP_EVENT_SONOS_STATE_UPDATE, // data: SonosState*
 };
 

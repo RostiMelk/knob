@@ -64,7 +64,6 @@ static void discover_and_connect_task(void *) {
     settings_set_speaker_name(speaker.name);
     ui_set_speaker_name(speaker.name);
     sonos_start();
-    sonos_play_uri(STATIONS[s_station_index].url);
   } else if (result.count > 1) {
     ui_show_speaker_picker(&result);
   } else {
@@ -85,7 +84,6 @@ static void start_with_saved_speaker() {
   sonos_set_speaker(ip);
   ui_set_speaker_name(name[0] ? name : ip);
   sonos_start();
-  sonos_play_uri(STATIONS[s_station_index].url);
 }
 
 static void on_wifi_connected(void *, esp_event_base_t, int32_t, void *) {
@@ -104,6 +102,16 @@ static void on_wifi_disconnected(void *, esp_event_base_t, int32_t, void *) {
   ESP_LOGW(TAG, "WiFi disconnected");
   ui_set_wifi_status(false);
   sonos_stop();
+}
+
+static void on_play_requested(void *, esp_event_base_t, int32_t, void *) {
+  ESP_LOGI(TAG, "Play requested — station: %s", STATIONS[s_station_index].name);
+  sonos_play_uri(STATIONS[s_station_index].url);
+}
+
+static void on_stop_requested(void *, esp_event_base_t, int32_t, void *) {
+  ESP_LOGI(TAG, "Stop requested");
+  sonos_stop_playback();
 }
 
 static void init_nvs() {
@@ -125,6 +133,10 @@ static void register_events() {
                              on_station_changed, nullptr);
   esp_event_handler_register(APP_EVENT, APP_EVENT_VOLUME_CHANGED,
                              on_volume_changed, nullptr);
+  esp_event_handler_register(APP_EVENT, APP_EVENT_PLAY_REQUESTED,
+                             on_play_requested, nullptr);
+  esp_event_handler_register(APP_EVENT, APP_EVENT_STOP_REQUESTED,
+                             on_stop_requested, nullptr);
   esp_event_handler_register(APP_EVENT, APP_EVENT_WIFI_CONNECTED,
                              on_wifi_connected, nullptr);
   esp_event_handler_register(APP_EVENT, APP_EVENT_WIFI_DISCONNECTED,

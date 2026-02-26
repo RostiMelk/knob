@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 
 static constexpr const char *TAG = "ui";
 
@@ -51,6 +52,7 @@ static int s_volume;
 static int s_station_index;
 static int s_browse_index;
 static PlayState s_play_state = PlayState::Stopped;
+static bool s_was_playing;
 
 // ─── Widgets ────────────────────────────────────────────────────────────────
 
@@ -72,6 +74,10 @@ static lv_obj_t *s_lbl_subtitle;
 // Browse mode extras
 static lv_obj_t *s_lbl_position;
 
+// Clock (idle state)
+static lv_obj_t *s_lbl_clock;
+static lv_timer_t *s_clock_timer;
+
 // Speaker (bottom)
 static lv_obj_t *s_lbl_speaker;
 
@@ -84,6 +90,10 @@ static lv_timer_t *s_vol_hide_timer;
 
 // Browse timeout
 static lv_timer_t *s_browse_timer;
+
+// Touch press detection (manual long-press via timer)
+static lv_timer_t *s_press_timer;
+static bool s_press_was_long;
 
 // Speaker picker
 static lv_obj_t *s_scr_speaker_picker;
@@ -132,10 +142,49 @@ static void enter_browse();
 static void exit_browse();
 static void confirm_browse();
 static void update_subtitle();
+static void update_clock();
+static void show_idle_ui(bool idle);
+static void do_tap();
+static void do_long_press();
 
 // ─── Volume Arc ─────────────────────────────────────────────────────────────
 
 static void on_vol_hide(lv_timer_t *) {}
+
+// ─── Clock ──────────────────────────────────────────────────────────────────
+
+static void update_clock() {
+  time_t now = time(nullptr);
+  struct tm *t = localtime(&now);
+  char buf[6];
+  snprintf(buf, sizeof(buf), "%02d:%02d", t->tm_hour, t->tm_min);
+  lv_label_set_text(s_lbl_clock, buf);
+}
+
+static void on_clock_tick(lv_timer_t *) { update_clock(); }
+
+static void show_idle_ui(bool idle) {
+  if (idle) {
+    update_clock();
+    lv_obj_remove_flag(s_lbl_clock, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_logo_container, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_lbl_station, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_lbl_speaker, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_image_opa(s_bg_img, LV_OPA_30, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_screen, lv_color_black(), LV_PART_MAIN);
+    lv_obj_align(s_lbl_subtitle, LV_ALIGN_CENTER, 0, 30);
+    lv_timer_resume(s_clock_timer);
+  } else {
+    lv_obj_add_flag(s_lbl_clock, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(s_logo_container, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(s_lbl_station, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(s_lbl_speaker, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_image_opa(s_bg_img, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_opa(s_logo_container, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_align(s_lbl_subtitle, LV_ALIGN_CENTER, 0, 94);
+    lv_timer_pause(s_clock_timer);
+  }
+}
 
 static void show_volume(int level) {
   lv_arc_set_value(s_vol_arc, level);
@@ -148,9 +197,11 @@ static void show_volume(int level) {
 
 static void enter_browse() {
   s_mode = Mode::Browse;
+  s_was_playing = (s_play_state == PlayState::Playing);
   s_browse_index = s_station_index;
 
   lv_obj_set_style_text_color(s_lbl_station, COL_TEXT, LV_PART_MAIN);
+  show_idle_ui(false);
   lv_obj_set_style_opa(s_logo_container, LV_OPA_70, LV_PART_MAIN);
 
   lv_label_set_text(s_lbl_subtitle, "Tap to play");
@@ -179,6 +230,7 @@ static void exit_browse() {
   lv_label_set_text(s_lbl_station, STATIONS[s_station_index].name);
   set_logo(s_station_index);
   update_subtitle();
+  show_idle_ui(!s_was_playing);
   lv_obj_set_style_text_color(s_lbl_subtitle, lv_color_hex(0x9A9A9A),
                               LV_PART_MAIN);
   lv_obj_add_flag(s_lbl_position, LV_OBJ_FLAG_HIDDEN);
@@ -194,6 +246,9 @@ static void confirm_browse() {
   set_logo(s_station_index);
   int32_t idx = s_station_index;
   esp_event_post(APP_EVENT, APP_EVENT_STATION_CHANGED, &idx, sizeof(idx), 0);
+  esp_event_post(APP_EVENT, APP_EVENT_PLAY_REQUESTED, nullptr, 0, 0);
+  s_play_state = PlayState::Playing;
+  s_was_playing = true;
   exit_browse();
 }
 
@@ -211,7 +266,7 @@ static void update_subtitle() {
     text = "Paused";
     break;
   case PlayState::Stopped:
-    text = "Stopped";
+    text = "Tap to browse stations";
     break;
   case PlayState::Transitioning:
     text = "Loading...";
@@ -225,7 +280,7 @@ static void update_subtitle() {
 
 // ─── Touch ──────────────────────────────────────────────────────────────────
 
-static void on_screen_tap(lv_event_t *) {
+static void do_tap() {
   if (s_on_picker)
     return;
 
@@ -239,6 +294,42 @@ static void on_screen_tap(lv_event_t *) {
   }
 }
 
+static void do_long_press() {
+  if (s_on_picker)
+    return;
+
+  if (s_mode == Mode::Browse) {
+    exit_browse();
+  }
+
+  if (s_play_state == PlayState::Playing ||
+      s_play_state == PlayState::Transitioning) {
+    s_play_state = PlayState::Stopped;
+    esp_event_post(APP_EVENT, APP_EVENT_STOP_REQUESTED, nullptr, 0, 0);
+    update_subtitle();
+    show_idle_ui(true);
+  }
+}
+
+static void on_press_timer(lv_timer_t *) {
+  s_press_was_long = true;
+  lv_timer_pause(s_press_timer);
+  do_long_press();
+}
+
+static void on_screen_pressed(lv_event_t *) {
+  s_press_was_long = false;
+  lv_timer_reset(s_press_timer);
+  lv_timer_resume(s_press_timer);
+}
+
+static void on_screen_released(lv_event_t *) {
+  lv_timer_pause(s_press_timer);
+  if (!s_press_was_long) {
+    do_tap();
+  }
+}
+
 // ─── Main Screen ────────────────────────────────────────────────────────────
 
 static void build_main_screen() {
@@ -247,7 +338,8 @@ static void build_main_screen() {
   lv_obj_remove_flag(s_screen, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_set_size(s_screen, LCD_H_RES, LCD_V_RES);
   lv_obj_add_flag(s_screen, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_add_event_cb(s_screen, on_screen_tap, LV_EVENT_CLICKED, nullptr);
+  lv_obj_add_event_cb(s_screen, on_screen_pressed, LV_EVENT_PRESSED, nullptr);
+  lv_obj_add_event_cb(s_screen, on_screen_released, LV_EVENT_RELEASED, nullptr);
 
   // ── Blurred background — fullscreen ambient image from artwork ──
   s_bg_img = lv_image_create(s_screen);
@@ -307,6 +399,14 @@ static void build_main_screen() {
   lv_image_set_inner_align(s_img_logo, LV_IMAGE_ALIGN_STRETCH);
   lv_obj_set_pos(s_img_logo, 0, 0);
   set_logo(0);
+
+  // ── Clock — large centered time, visible when idle ──
+  s_lbl_clock = lv_label_create(s_screen);
+  lv_obj_set_style_text_color(s_lbl_clock, COL_TEXT, LV_PART_MAIN);
+  lv_obj_set_style_text_font(s_lbl_clock, &lv_font_montserrat_48, LV_PART_MAIN);
+  lv_obj_set_style_text_opa(s_lbl_clock, LV_OPA_90, LV_PART_MAIN);
+  lv_label_set_text(s_lbl_clock, "00:00");
+  lv_obj_align(s_lbl_clock, LV_ALIGN_CENTER, 0, -20);
 
   // ── Station name ──
   s_lbl_station = lv_label_create(s_screen);
@@ -471,6 +571,12 @@ void ui_init() {
         lv_timer_create(on_browse_timeout, BROWSE_TIMEOUT_MS, nullptr);
     lv_timer_pause(s_browse_timer);
 
+    s_clock_timer = lv_timer_create(on_clock_tick, 30000, nullptr);
+
+    s_press_timer = lv_timer_create(on_press_timer, 500, nullptr);
+    lv_timer_pause(s_press_timer);
+    show_idle_ui(true);
+
     char saved_name[64] = {};
     settings_get_speaker_name(saved_name, sizeof(saved_name));
     if (saved_name[0])
@@ -495,8 +601,10 @@ void ui_set_volume(int level) {
 void ui_set_play_state(PlayState state) {
   if (display_lock(50)) {
     s_play_state = state;
-    if (s_mode == Mode::Volume)
+    if (s_mode == Mode::Volume) {
       update_subtitle();
+      show_idle_ui(state == PlayState::Stopped);
+    }
     display_unlock();
   }
 }
@@ -579,7 +687,14 @@ void ui_on_encoder_rotate(int32_t steps) {
 void ui_on_touch_tap() {
   if (!display_lock(50))
     return;
-  on_screen_tap(nullptr);
+  do_tap();
+  display_unlock();
+}
+
+void ui_on_touch_long_press() {
+  if (!display_lock(50))
+    return;
+  do_long_press();
   display_unlock();
 }
 
