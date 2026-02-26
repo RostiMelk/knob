@@ -1,0 +1,32 @@
+Checks: >
+  -*,
+  bugprone-*,
+  performance-*,
+  modernize-*,
+  misc-unused-using-decls,
+  misc-redundant-expression,
+  readability-duplicate-include,
+  readability-redundant-casting,
+  readability-container-size-empty,
+  readability-make-member-function-const,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+  -bugprone-suspicious-enum-usage,
+  -modernize-use-trailing-return-type,
+  -modernize-use-nodiscard,
+  -modernize-avoid-c-arrays,
+  -modernize-use-designated-initializers,
+  -performance-enum-size,
+  -performance-no-int-to-ptr,
+
+WarningsAsErrors: >
+  misc-unused-using-decls,
+  performance-unnecessary-copy-initialization,
+  performance-unnecessary-value-param,
+  bugprone-use-after-move,
+
+HeaderFilterRegex: 'main/.*\.h$'
+
+CheckOptions:
+  - key: performance-unnecessary-value-param.AllowedTypes
+    value: 'std::string_view'
