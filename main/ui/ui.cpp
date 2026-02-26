@@ -288,15 +288,25 @@ static void enter_browse() {
   s_browse_index = s_station_index;
 
   lv_obj_set_style_text_color(s_lbl_station, COL_TEXT, LV_PART_MAIN);
-  show_idle_ui(false);
 
-  lv_anim_delete(s_logo_container, anim_opa_cb);
-  anim_fade(s_logo_container, anim_opa_cb, LV_OPA_TRANSP, LV_OPA_70,
-            ANIM_FADE_MS);
+  if (s_was_playing) {
+    lv_anim_delete(s_logo_container, anim_opa_cb);
+    anim_fade(s_logo_container, anim_opa_cb, LV_OPA_COVER, LV_OPA_70,
+              ANIM_FADE_MS);
+  } else {
+    show_idle_ui(false);
+    lv_anim_delete(s_logo_container, anim_opa_cb);
+    anim_fade(s_logo_container, anim_opa_cb, LV_OPA_TRANSP, LV_OPA_70,
+              ANIM_FADE_MS);
+  }
 
   lv_label_set_text(s_lbl_subtitle, "Tap to play");
   lv_obj_set_style_text_color(s_lbl_subtitle, lv_color_hex(0xBBBBBB),
                               LV_PART_MAIN);
+  lv_anim_delete(s_lbl_subtitle, anim_opa_cb);
+  lv_obj_set_style_opa(s_lbl_subtitle, LV_OPA_TRANSP, LV_PART_MAIN);
+  anim_fade(s_lbl_subtitle, anim_opa_cb, LV_OPA_TRANSP, LV_OPA_COVER,
+            ANIM_QUICK_MS);
 
   char pos[16];
   snprintf(pos, sizeof(pos), "%d / %d", s_browse_index + 1, STATION_COUNT);
@@ -322,12 +332,18 @@ static void exit_browse() {
   lv_label_set_text(s_lbl_station, STATIONS[s_station_index].name);
   set_logo(s_station_index);
   update_subtitle();
-  show_idle_ui(!s_was_playing);
 
   if (s_was_playing) {
     lv_anim_delete(s_logo_container, anim_opa_cb);
     anim_fade(s_logo_container, anim_opa_cb, LV_OPA_70, LV_OPA_COVER,
               ANIM_FADE_MS);
+
+    lv_anim_delete(s_lbl_subtitle, anim_opa_cb);
+    lv_obj_set_style_opa(s_lbl_subtitle, LV_OPA_TRANSP, LV_PART_MAIN);
+    anim_fade(s_lbl_subtitle, anim_opa_cb, LV_OPA_TRANSP, LV_OPA_COVER,
+              ANIM_QUICK_MS);
+  } else {
+    show_idle_ui(true);
   }
 
   lv_obj_set_style_text_color(s_lbl_subtitle, lv_color_hex(0x9A9A9A),
