@@ -1,5 +1,6 @@
 #include "app_config.h"
 #include "input/encoder.h"
+#include "input/haptic.h"
 #include "net/wifi_manager.h"
 #include "sonos/discovery.h"
 #include "sonos/sonos.h"
@@ -157,6 +158,7 @@ extern "C" void app_main() {
 
   register_events();
   ui_init();
+  haptic_init();
   encoder_init();
   discovery_init();
   sonos_init();

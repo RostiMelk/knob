@@ -49,6 +49,7 @@ add_executable(sim
     sim_main.cpp
     display_sdl.cpp
     "${CMAKE_CURRENT_SOURCE_DIR}/../main/ui/ui.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../main/ui/ui_voice.cpp"
 )
 
 # Include order matters: shims FIRST so they override ESP-IDF headers,
@@ -56,6 +57,7 @@ add_executable(sim
 target_include_directories(sim PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/shims"
     "${CMAKE_CURRENT_SOURCE_DIR}/../main"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../main/ui"
     "${CMAKE_CURRENT_SOURCE_DIR}"
     ${SDL2_INCLUDE_DIRS}
 )

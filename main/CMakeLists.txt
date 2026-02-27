@@ -4,8 +4,10 @@ set(SRCS
     "sonos/sonos.cpp"
     "sonos/discovery.cpp"
     "input/encoder.cpp"
+    "input/haptic.cpp"
     "storage/settings.cpp"
     "ui/ui.cpp"
+    "ui/ui_voice.cpp"
     "ui/display_idf.cpp"
 )
 

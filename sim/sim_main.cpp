@@ -31,6 +31,13 @@ static int sdl_event_watch(void *, SDL_Event *event) {
     case SDLK_l:
       ui_on_touch_long_press();
       break;
+    case SDLK_v:
+    case SDLK_d:
+      if (ui_is_voice_active())
+        ui_voice_deactivate();
+      else
+        ui_voice_activate();
+      break;
     case SDLK_q:
     case SDLK_ESCAPE:
       s_running = false;
@@ -65,7 +72,8 @@ int main(int, char **) {
   printf("  Up/Down     Encoder rotate\n");
   printf("  Enter/Space Tap (play / browse / select)\n");
   printf("  L           Long press (stop)\n");
-  printf("  Mouse click Tap\n");
+  printf("  V / D       Toggle voice mode\n");
+  printf("  Mouse click Tap (double-click = voice)\n");
   printf("  Scroll      Encoder rotate\n");
   printf("  Q/Esc       Quit\n");
   printf("──────────────────────────────────────\n");

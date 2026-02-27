@@ -110,6 +110,28 @@ constexpr Station STATIONS[] = {
 
 constexpr int STATION_COUNT = sizeof(STATIONS) / sizeof(STATIONS[0]);
 
+// ─── Voice Mode ─────────────────────────────────────────────────────────────
+
+constexpr int VOICE_TASK_STACK = 12288;
+constexpr int VOICE_TASK_PRIO = 5;
+constexpr int VOICE_TASK_CORE = 1;
+
+constexpr int VOICE_DUCKED_VOLUME = 1;
+constexpr int VOICE_IDLE_TIMEOUT_MS = 8000;
+constexpr int DOUBLE_TAP_WINDOW_MS = 300;
+
+constexpr const char *OPENAI_REALTIME_URL =
+    "wss://api.openai.com/v1/realtime?model=gpt-realtime-1.5";
+constexpr const char *OPENAI_VOICE = "cedar";
+
+enum class VoiceState : uint8_t {
+  Inactive,
+  Connecting,
+  Listening,
+  Thinking,
+  Speaking,
+};
+
 // ─── Application Events ─────────────────────────────────────────────────────
 
 ESP_EVENT_DECLARE_BASE(APP_EVENT);
@@ -123,6 +145,10 @@ enum : int32_t {
   APP_EVENT_PLAY_REQUESTED,     // user wants to start playing current station
   APP_EVENT_STOP_REQUESTED,     // user wants to stop and release speaker
   APP_EVENT_SONOS_STATE_UPDATE, // data: SonosState*
+  APP_EVENT_VOICE_ACTIVATE,     // double-tap detected → enter voice mode
+  APP_EVENT_VOICE_DEACTIVATE,   // timeout or user exit → leave voice mode
+  APP_EVENT_VOICE_STATE,        // data: VoiceState enum
+  APP_EVENT_VOICE_TRANSCRIPT, // data: null-terminated string (user or AI text)
 };
 
 // ─── Sonos State (passed with APP_EVENT_SONOS_STATE_UPDATE) ─────────────────

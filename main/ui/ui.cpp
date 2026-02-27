@@ -1,8 +1,10 @@
 #include "ui.h"
 #include "app_config.h"
+#include "input/haptic.h"
 #include "sonos/sonos.h"
 #include "storage/settings.h"
 #include "ui/display.h"
+#include "ui_voice.h"
 
 #include "esp_log.h"
 #include "lvgl.h"
@@ -26,7 +28,7 @@ static constexpr const char *TAG = "ui";
 //    7s inactivity → cancel, revert, → VOLUME
 //
 
-enum class Mode { Volume, Browse };
+enum class Mode { Volume, Browse, Voice };
 
 static constexpr int BROWSE_TIMEOUT_MS = 7000;
 static constexpr int VOL_DISPLAY_MS = 1500;
@@ -98,6 +100,11 @@ static lv_timer_t *s_browse_timer;
 static lv_timer_t *s_press_timer;
 static bool s_press_was_long;
 
+// Double-tap detection for voice mode
+static uint32_t s_last_tap_ms;
+static lv_timer_t *s_tap_delay_timer;
+static int s_pre_voice_volume;
+
 // Speaker picker
 static lv_obj_t *s_scr_speaker_picker;
 static lv_obj_t *s_scanning_overlay;
@@ -149,6 +156,8 @@ static void update_clock();
 static void show_idle_ui(bool idle);
 static void do_tap();
 static void do_long_press();
+static void activate_voice();
+static void deactivate_voice();
 
 // ─── Animation Helpers ──────────────────────────────────────────────────────
 
@@ -399,6 +408,36 @@ static void update_subtitle() {
 
 // ─── Touch ──────────────────────────────────────────────────────────────────
 
+static void on_tap_delay(lv_timer_t *) {
+  lv_timer_pause(s_tap_delay_timer);
+  s_last_tap_ms = 0;
+  do_tap();
+}
+
+static void activate_voice() {
+  if (s_mode == Mode::Voice)
+    return;
+  if (s_mode == Mode::Browse)
+    exit_browse();
+
+  s_pre_voice_volume = s_volume;
+  s_mode = Mode::Voice;
+  voice_ui_enter();
+  sonos_set_volume(VOICE_DUCKED_VOLUME);
+  esp_event_post(APP_EVENT, APP_EVENT_VOICE_ACTIVATE, nullptr, 0, 0);
+}
+
+static void deactivate_voice() {
+  if (s_mode != Mode::Voice)
+    return;
+
+  voice_ui_exit();
+  s_mode = Mode::Volume;
+  sonos_set_volume(s_pre_voice_volume);
+  update_subtitle();
+  esp_event_post(APP_EVENT, APP_EVENT_VOICE_DEACTIVATE, nullptr, 0, 0);
+}
+
 static void do_tap() {
   if (s_on_picker)
     return;
@@ -410,12 +449,19 @@ static void do_tap() {
   case Mode::Browse:
     confirm_browse();
     break;
+  case Mode::Voice:
+    break;
   }
 }
 
 static void do_long_press() {
   if (s_on_picker)
     return;
+
+  if (s_mode == Mode::Voice) {
+    deactivate_voice();
+    return;
+  }
 
   if (s_mode == Mode::Browse) {
     exit_browse();
@@ -444,8 +490,23 @@ static void on_screen_pressed(lv_event_t *) {
 
 static void on_screen_released(lv_event_t *) {
   lv_timer_pause(s_press_timer);
-  if (!s_press_was_long) {
-    do_tap();
+  if (s_press_was_long)
+    return;
+
+  if (s_mode == Mode::Voice) {
+    deactivate_voice();
+    return;
+  }
+
+  uint32_t now = lv_tick_get();
+  if (s_last_tap_ms && (now - s_last_tap_ms) < DOUBLE_TAP_WINDOW_MS) {
+    s_last_tap_ms = 0;
+    lv_timer_pause(s_tap_delay_timer);
+    activate_voice();
+  } else {
+    s_last_tap_ms = now;
+    lv_timer_reset(s_tap_delay_timer);
+    lv_timer_resume(s_tap_delay_timer);
   }
 }
 
@@ -694,6 +755,13 @@ void ui_init() {
 
     s_press_timer = lv_timer_create(on_press_timer, 500, nullptr);
     lv_timer_pause(s_press_timer);
+
+    s_tap_delay_timer =
+        lv_timer_create(on_tap_delay, DOUBLE_TAP_WINDOW_MS, nullptr);
+    lv_timer_pause(s_tap_delay_timer);
+
+    voice_ui_build(s_screen);
+
     show_idle_ui(true);
 
     char saved_name[64] = {};
@@ -759,6 +827,38 @@ void ui_set_speaker_name(const char *name) {
   }
 }
 
+// ─── Voice Mode ─────────────────────────────────────────────────────────────
+
+void ui_voice_activate() {
+  if (!display_lock(50))
+    return;
+  activate_voice();
+  display_unlock();
+}
+
+void ui_voice_deactivate() {
+  if (!display_lock(50))
+    return;
+  deactivate_voice();
+  display_unlock();
+}
+
+void ui_voice_set_state(VoiceState state) {
+  if (!display_lock(50))
+    return;
+  voice_ui_set_state(state);
+  display_unlock();
+}
+
+void ui_voice_set_transcript(const char *text, bool is_user) {
+  if (!display_lock(50))
+    return;
+  voice_ui_set_transcript(text, is_user);
+  display_unlock();
+}
+
+bool ui_is_voice_active() { return s_mode == Mode::Voice; }
+
 void ui_on_encoder_rotate(int32_t steps) {
   if (!display_lock(50))
     return;
@@ -774,10 +874,17 @@ void ui_on_encoder_rotate(int32_t steps) {
     return;
   }
 
+  if (s_mode == Mode::Voice) {
+    display_unlock();
+    return;
+  }
+
   switch (s_mode) {
   case Mode::Volume: {
-    s_volume = std::clamp(s_volume + static_cast<int>(steps) * VOLUME_STEP,
-                          VOLUME_MIN, VOLUME_MAX);
+    int raw = s_volume + static_cast<int>(steps) * VOLUME_STEP;
+    s_volume = std::clamp(raw, VOLUME_MIN, VOLUME_MAX);
+    if (raw < VOLUME_MIN || raw > VOLUME_MAX)
+      haptic_buzz();
     show_volume(s_volume);
     int32_t vol = s_volume;
     esp_event_post(APP_EVENT, APP_EVENT_VOLUME_CHANGED, &vol, sizeof(vol), 0);
@@ -808,6 +915,8 @@ void ui_on_encoder_rotate(int32_t steps) {
     lv_timer_reset(s_browse_timer);
     break;
   }
+  case Mode::Voice:
+    break;
   }
 
   display_unlock();
@@ -816,7 +925,10 @@ void ui_on_encoder_rotate(int32_t steps) {
 void ui_on_touch_tap() {
   if (!display_lock(50))
     return;
-  do_tap();
+  if (s_mode == Mode::Voice)
+    deactivate_voice();
+  else
+    do_tap();
   display_unlock();
 }
 

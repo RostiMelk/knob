@@ -20,6 +20,7 @@ static constexpr const char *TAG = "display";
 static esp_lcd_panel_handle_t s_panel;
 static esp_lcd_panel_io_handle_t s_panel_io;
 static esp_lcd_touch_handle_t s_touch;
+static i2c_master_bus_handle_t s_i2c_bus;
 
 static void init_backlight() {
   ledc_timer_config_t timer_cfg = {};
@@ -104,15 +105,14 @@ static void init_touch_hw() {
   i2c_bus_cfg.scl_io_num = static_cast<gpio_num_t>(PIN_TOUCH_SCL);
   i2c_bus_cfg.flags.enable_internal_pullup = true;
 
-  i2c_master_bus_handle_t i2c_bus;
-  ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &i2c_bus));
+  ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &s_i2c_bus));
 
   esp_lcd_panel_io_i2c_config_t io_cfg = {};
   io_cfg.scl_speed_hz = TOUCH_I2C_FREQ;
   io_cfg.dev_addr = TOUCH_I2C_ADDR;
 
   esp_lcd_panel_io_handle_t touch_io;
-  ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(i2c_bus, &io_cfg, &touch_io));
+  ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(s_i2c_bus, &io_cfg, &touch_io));
 
   esp_lcd_touch_config_t touch_cfg = {};
   touch_cfg.x_max = LCD_H_RES;
@@ -124,6 +124,8 @@ static void init_touch_hw() {
       esp_lcd_touch_new_i2c_cst816s(touch_io, &touch_cfg, &s_touch));
   ESP_LOGI(TAG, "Touch initialized");
 }
+
+i2c_master_bus_handle_t display_get_i2c_bus() { return s_i2c_bus; }
 
 void display_init(lv_display_t **disp, lv_indev_t **touch) {
   init_lcd();
