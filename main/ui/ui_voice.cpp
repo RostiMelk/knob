@@ -1,4 +1,5 @@
 #include "ui_voice.h"
+#include "fonts/fonts.h"
 #include "ui.h"
 
 #include "app_config.h"
@@ -237,8 +238,7 @@ void voice_ui_build(lv_obj_t *parent) {
   // ── Status label (top) ──
   s_lbl_status = lv_label_create(s_overlay);
   lv_obj_set_style_text_color(s_lbl_status, COL_V_GRAY, LV_PART_MAIN);
-  lv_obj_set_style_text_font(s_lbl_status, &lv_font_montserrat_14,
-                             LV_PART_MAIN);
+  lv_obj_set_style_text_font(s_lbl_status, &geist_regular_14, LV_PART_MAIN);
   lv_obj_set_style_text_align(s_lbl_status, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
   lv_label_set_text(s_lbl_status, "");
   lv_obj_align(s_lbl_status, LV_ALIGN_TOP_MID, 0, 75);
@@ -261,8 +261,7 @@ void voice_ui_build(lv_obj_t *parent) {
   // ── Transcript (below orb) ──
   s_lbl_transcript = lv_label_create(s_overlay);
   lv_obj_set_style_text_color(s_lbl_transcript, COL_V_TEXT, LV_PART_MAIN);
-  lv_obj_set_style_text_font(s_lbl_transcript, &lv_font_montserrat_14,
-                             LV_PART_MAIN);
+  lv_obj_set_style_text_font(s_lbl_transcript, &geist_regular_14, LV_PART_MAIN);
   lv_obj_set_style_text_align(s_lbl_transcript, LV_TEXT_ALIGN_CENTER,
                               LV_PART_MAIN);
   lv_obj_set_width(s_lbl_transcript, LCD_H_RES - 60);
@@ -274,7 +273,7 @@ void voice_ui_build(lv_obj_t *parent) {
   // ── Hint (bottom) ──
   s_lbl_hint = lv_label_create(s_overlay);
   lv_obj_set_style_text_color(s_lbl_hint, COL_V_DIM, LV_PART_MAIN);
-  lv_obj_set_style_text_font(s_lbl_hint, &lv_font_montserrat_14, LV_PART_MAIN);
+  lv_obj_set_style_text_font(s_lbl_hint, &geist_regular_14, LV_PART_MAIN);
   lv_label_set_text(s_lbl_hint, "Exits automatically");
   lv_obj_align(s_lbl_hint, LV_ALIGN_BOTTOM_MID, 0, -55);
 

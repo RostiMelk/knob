@@ -67,7 +67,7 @@ The PDM mic captures at a configurable rate. We resample to 24kHz mono PCM16 bef
   "session": {
     "type": "realtime",
     "model": "gpt-realtime-1.5",
-    "instructions": "You are a helpful voice assistant built into a radio. Be concise — answers should be 1-3 sentences. Speak naturally and warmly. The user is controlling a Sonos speaker playing Norwegian radio stations.",
+    "instructions": "You are a helpful voice assistant built into a Sonos radio controller. Be concise — answers should be 1-3 sentences. Speak naturally and warmly. The user is controlling a Sonos speaker playing Norwegian radio stations. You can set timers, switch stations, adjust volume, and check what's playing. When the user asks to play a station, use the play_station tool. When the user asks about time remaining on a timer, use get_timer_status. Always confirm actions briefly after executing a tool.",
     "audio": {
       "input": {
         "format": { "type": "audio/pcm", "rate": 24000 },
@@ -85,6 +85,73 @@ The PDM mic captures at a configurable rate. We resample to 24kHz mono PCM16 bef
         "voice": "cedar"
       }
     },
+    "tools": [
+      {
+        "type": "function",
+        "name": "set_timer",
+        "description": "Set a countdown timer. When it expires the device will beep and show a notification. Only one timer at a time.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "seconds": {
+              "type": "integer",
+              "description": "Duration in seconds (1-3600)"
+            },
+            "label": {
+              "type": "string",
+              "description": "Optional short label, e.g. 'eggs' or 'pizza'"
+            }
+          },
+          "required": ["seconds"]
+        }
+      },
+      {
+        "type": "function",
+        "name": "cancel_timer",
+        "description": "Cancel the currently running timer, if any.",
+        "parameters": { "type": "object", "properties": {} }
+      },
+      {
+        "type": "function",
+        "name": "get_timer_status",
+        "description": "Check how much time is left on the current timer.",
+        "parameters": { "type": "object", "properties": {} }
+      },
+      {
+        "type": "function",
+        "name": "play_station",
+        "description": "Switch to a radio station by name. Available: NRK P1 Oslo, NRK P2, NRK P3, NRK MP3, NRK Jazz, P4 Norge, P5 Hits, P9 Retro, Radio Rock, Radio Norge, NRJ Norge.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "station_name": {
+              "type": "string",
+              "description": "Name of the station (case-insensitive partial match)"
+            }
+          },
+          "required": ["station_name"]
+        }
+      },
+      {
+        "type": "function",
+        "name": "set_volume",
+        "description": "Set the Sonos speaker volume.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "level": { "type": "integer", "description": "Volume level 0-100" }
+          },
+          "required": ["level"]
+        }
+      },
+      {
+        "type": "function",
+        "name": "get_now_playing",
+        "description": "Get the currently playing station name, play state, and volume.",
+        "parameters": { "type": "object", "properties": {} }
+      }
+    ],
+    "tool_choice": "auto",
     "output_modalities": ["audio"],
     "max_output_tokens": 1024
   }
@@ -98,15 +165,17 @@ Key choices:
 - **`interrupt_response: true`** — if the user starts talking while the AI is responding, it cancels and listens. Natural conversational behavior.
 - **`voice: cedar`** — OpenAI recommends `cedar` or `marin` for best quality.
 - **Input transcription enabled** — we get text transcripts of what the user said (for displaying on screen), running on a separate ASR model.
+- **`tools`** — six function-calling tools let the model control the device: set/cancel/query timers, switch stations, adjust volume, and check now-playing state. Implemented in `main/voice/voice_tools.cpp`.
+- **`tool_choice: auto`** — the model decides when to call tools vs. respond with speech. For direct commands ("play jazz", "set a 5 minute timer") it calls the tool; for questions it responds normally.
 
-### Event flow (happy path)
+### Event flow (happy path — speech response)
 
 ```
 ESP32                                    OpenAI
   │                                        │
   │──── WebSocket connect ────────────────►│
   │◄──── session.created ─────────────────│
-  │──── session.update (config above) ───►│
+  │──── session.update (config+tools) ───►│
   │◄──── session.updated ─────────────────│
   │                                        │
   │  [user speaks into PDM mic]            │
@@ -126,6 +195,48 @@ ESP32                                    OpenAI
   │  [user speaks again → timer resets]    │
   │  [8s silence → auto-exit voice mode]   │
 ```
+
+### Event flow (tool call — e.g. "set a 5 minute timer")
+
+When the model decides to call a tool instead of (or before) producing audio, the flow includes a function-call round-trip. The ESP32 executes the tool locally and feeds the result back so the model can speak a confirmation.
+
+```
+ESP32                                    OpenAI
+  │                                        │
+  │  [user: "set a 5 minute timer"]        │
+  │──── input_audio_buffer.append ───────►│
+  │◄──── speech_started ──────────────────│  → UI: Listening
+  │◄──── speech_stopped ──────────────────│  → UI: Thinking
+  │                                        │
+  │◄──── response.created ────────────────│
+  │◄──── response.function_call_arguments │  (streamed incrementally)
+  │      .done                             │
+  │      name: "set_timer"                 │
+  │      arguments: {"seconds":300,        │
+  │                   "label":"timer"}      │
+  │      call_id: "call_abc123"            │
+  │                                        │
+  │  [voice_tools_execute("set_timer",...)]│  → starts 300s countdown
+  │                                        │
+  │──── conversation.item.create ────────►│  tool result:
+  │      type: function_call_output        │  "Timer 'timer' set for 5 min 0 sec."
+  │      call_id: "call_abc123"            │
+  │──── response.create ─────────────────►│  (ask model to continue)
+  │                                        │
+  │◄──── response.created ────────────────│
+  │◄──── response.output_audio.delta ─────│  "Done! 5 minute timer started."
+  │◄──── response.output_audio.delta ─────│  → I2S DAC playback
+  │◄──── response.audio_transcript.done ──│  → UI: show text
+  │◄──── response.done ───────────────────│  → UI: orb settles
+  │                                        │     idle timer starts (8s)
+```
+
+Key details:
+
+- **Tool execution is local** — `voice_tools_execute()` runs on the ESP32 and returns immediately. No network round-trip beyond the WebSocket.
+- **Two frames sent back** — first `conversation.item.create` with the tool output, then `response.create` to trigger the model's spoken confirmation. Both are built by `voice_protocol_handle_tool_call()`.
+- **Model speaks after tool** — the `response.create` causes the model to generate a new audio response incorporating the tool result (e.g. "Done! 5 minute timer started.").
+- **Multiple tools per turn** — if the model calls several tools (e.g. "play jazz and set volume to 30"), each `response.function_call_arguments.done` is handled independently, and the final `response.create` triggers the spoken summary.
 
 ### Authentication
 
@@ -531,7 +642,10 @@ The demo sequence runs via `s_sim_timer` in `ui_voice.cpp`, gated behind `#ifdef
 - Streaming AI audio to Sonos (requires HTTP server on ESP32)
 - Wake word detection ("Hey radio")
 - Conversation history persistence across sessions
-- Function calling (e.g., "play jazz" → switch station via tool call)
 - Using the co-processor ESP32-U4WDH for audio offload
 
-These are all great future enhancements but are out of scope for the initial voice mode implementation.
+These are future enhancements out of scope for the initial voice mode implementation.
+
+### ~~Function calling~~ → DONE
+
+Function calling (tool use) is implemented in `main/voice/`. The LLM can call tools to set timers, switch stations, adjust volume, and query now-playing state. See `voice_tools.h`, `voice_protocol.h`, and `voice_session.h`.

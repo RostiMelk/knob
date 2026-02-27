@@ -5,10 +5,14 @@
 #include "sonos/discovery.h"
 #include "sonos/sonos.h"
 #include "storage/settings.h"
+#include "timer/timer.h"
 #include "ui/ui.h"
+#include "ui/ui_timer.h"
+#include "voice/voice_tools.h"
 
 #include "esp_event.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "nvs_flash.h"
 
 #include "freertos/FreeRTOS.h"
@@ -22,6 +26,7 @@ ESP_EVENT_DEFINE_BASE(APP_EVENT);
 
 static int s_volume;
 static int s_station_index;
+static esp_timer_handle_t s_timer_tick_handle;
 
 static void on_encoder_rotate(void *, esp_event_base_t, int32_t, void *data) {
   auto delta = *static_cast<int32_t *>(data);
@@ -50,6 +55,22 @@ static void on_sonos_state(void *, esp_event_base_t, int32_t, void *data) {
     s_volume = state->volume;
     ui_set_volume(s_volume);
   }
+}
+
+static void on_timer_tick(void *) { timer_tick(); }
+
+static void on_timer_started(void *, esp_event_base_t, int32_t, void *data) {
+  auto total = *static_cast<int32_t *>(data);
+  char label[64];
+  timer_get_label(label, sizeof(label));
+  ESP_LOGI(TAG, "Timer started: %ds '%s'", total, label);
+  ui_timer_show(total, label);
+}
+
+static void on_timer_fired(void *, esp_event_base_t, int32_t, void *data) {
+  auto *label = static_cast<const char *>(data);
+  ESP_LOGI(TAG, "Timer fired: %s", label ? label : "(none)");
+  haptic_buzz();
 }
 
 static void discover_and_connect_task(void *) {
@@ -144,6 +165,18 @@ static void register_events() {
                              on_wifi_disconnected, nullptr);
   esp_event_handler_register(APP_EVENT, APP_EVENT_SONOS_STATE_UPDATE,
                              on_sonos_state, nullptr);
+  esp_event_handler_register(APP_EVENT, APP_EVENT_TIMER_STARTED,
+                             on_timer_started, nullptr);
+  esp_event_handler_register(APP_EVENT, APP_EVENT_TIMER_FIRED, on_timer_fired,
+                             nullptr);
+}
+
+static void start_timer_tick() {
+  esp_timer_create_args_t args = {};
+  args.callback = on_timer_tick;
+  args.name = "voice_timer";
+  ESP_ERROR_CHECK(esp_timer_create(&args, &s_timer_tick_handle));
+  ESP_ERROR_CHECK(esp_timer_start_periodic(s_timer_tick_handle, 1'000'000));
 }
 
 extern "C" void app_main() {
@@ -162,6 +195,10 @@ extern "C" void app_main() {
   encoder_init();
   discovery_init();
   sonos_init();
+  timer_init();
+  ui_timer_init();
+  voice_tools_init();
+  start_timer_tick();
   wifi_manager_init();
 
   ESP_LOGI(TAG, "Init complete — station: %s, volume: %d",

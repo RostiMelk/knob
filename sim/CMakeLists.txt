@@ -48,8 +48,20 @@ target_link_libraries(lvgl PUBLIC ${SDL2_LIBRARIES})
 add_executable(sim
     sim_main.cpp
     display_sdl.cpp
+    "${CMAKE_CURRENT_SOURCE_DIR}/../main/fonts/geist_regular_14.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../main/fonts/geist_regular_16.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../main/fonts/geist_regular_20.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../main/fonts/geist_medium_24.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../main/fonts/geist_mono_medium_48.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/../main/ui/ui.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../main/ui/ui_pages.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../main/ui/ui_timer.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../main/ui/ui_voice.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../main/timer/timer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../main/voice/voice_tools.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../main/voice/voice_session.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../main/voice/voice_protocol.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../main/voice/tools_radio.cpp"
 )
 
 # Include order matters: shims FIRST so they override ESP-IDF headers,

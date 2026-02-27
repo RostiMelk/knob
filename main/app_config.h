@@ -149,6 +149,8 @@ enum : int32_t {
   APP_EVENT_VOICE_DEACTIVATE,   // timeout or user exit → leave voice mode
   APP_EVENT_VOICE_STATE,        // data: VoiceState enum
   APP_EVENT_VOICE_TRANSCRIPT, // data: null-terminated string (user or AI text)
+  APP_EVENT_TIMER_STARTED,    // data: int32_t total seconds
+  APP_EVENT_TIMER_FIRED,      // data: null-terminated label string
 };
 
 // ─── Sonos State (passed with APP_EVENT_SONOS_STATE_UPDATE) ─────────────────

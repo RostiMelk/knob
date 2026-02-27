@@ -1,9 +1,12 @@
 #include "ui.h"
 #include "app_config.h"
+#include "fonts/fonts.h"
 #include "input/haptic.h"
 #include "sonos/sonos.h"
 #include "storage/settings.h"
 #include "ui/display.h"
+#include "ui_pages.h"
+#include "ui_timer.h"
 #include "ui_voice.h"
 
 #include "esp_log.h"
@@ -62,6 +65,7 @@ static bool s_was_playing;
 // ─── Widgets ────────────────────────────────────────────────────────────────
 
 static lv_obj_t *s_screen;
+static lv_obj_t *s_home;
 
 // Status bar (top)
 static lv_obj_t *s_wifi_dot;
@@ -89,7 +93,7 @@ static lv_obj_t *s_lbl_speaker;
 // Artwork container (rounded card with shadow)
 static lv_obj_t *s_logo_container;
 
-// Volume arc (edge of display)
+// Volume arc (inside home page)
 static lv_obj_t *s_vol_arc;
 static lv_timer_t *s_vol_hide_timer;
 
@@ -153,11 +157,13 @@ static void exit_browse();
 static void confirm_browse();
 static void update_subtitle();
 static void update_clock();
+static bool home_should_idle();
 static void show_idle_ui(bool idle);
 static void do_tap();
 static void do_long_press();
 static void activate_voice();
 static void deactivate_voice();
+static void on_page_changed(int index, const char *id);
 
 // ─── Animation Helpers ──────────────────────────────────────────────────────
 
@@ -212,7 +218,14 @@ static void update_clock() {
 
 static void on_clock_tick(lv_timer_t *) { update_clock(); }
 
+static bool home_should_idle() {
+  return s_play_state == PlayState::Stopped && s_mode == Mode::Volume;
+}
+
 static void show_idle_ui(bool idle) {
+  if (!pages_is_home())
+    return;
+
   lv_anim_delete(s_lbl_clock, anim_opa_cb);
   lv_anim_delete(s_logo_container, anim_opa_cb);
   lv_anim_delete(s_lbl_station, anim_opa_cb);
@@ -512,17 +525,13 @@ static void on_screen_released(lv_event_t *) {
 
 // ─── Main Screen ────────────────────────────────────────────────────────────
 
-static void build_main_screen() {
-  s_screen = lv_obj_create(nullptr);
-  lv_obj_set_style_bg_color(s_screen, COL_BG, LV_PART_MAIN);
-  lv_obj_remove_flag(s_screen, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_set_size(s_screen, LCD_H_RES, LCD_V_RES);
-  lv_obj_add_flag(s_screen, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_add_event_cb(s_screen, on_screen_pressed, LV_EVENT_PRESSED, nullptr);
-  lv_obj_add_event_cb(s_screen, on_screen_released, LV_EVENT_RELEASED, nullptr);
+// ─── Home Page (page 0 in pager) ────────────────────────────────────────────
 
-  // ── Blurred background — fullscreen ambient image from artwork ──
-  s_bg_img = lv_image_create(s_screen);
+static void home_page_build(lv_obj_t *parent) {
+  s_home = parent;
+
+  // ── Blurred background ──
+  s_bg_img = lv_image_create(parent);
   lv_obj_set_size(s_bg_img, LCD_H_RES, LCD_V_RES);
   lv_obj_align(s_bg_img, LV_ALIGN_CENTER, 0, 0);
   lv_image_set_inner_align(s_bg_img, LV_IMAGE_ALIGN_STRETCH);
@@ -531,7 +540,7 @@ static void build_main_screen() {
   lv_obj_remove_flag(s_bg_img, LV_OBJ_FLAG_SCROLLABLE);
 
   // ── Volume arc — hugs the edge of the round display ──
-  s_vol_arc = lv_arc_create(s_screen);
+  s_vol_arc = lv_arc_create(parent);
   lv_obj_set_size(s_vol_arc, LCD_H_RES - 4, LCD_V_RES - 4);
   lv_obj_center(s_vol_arc);
   lv_arc_set_rotation(s_vol_arc, 135);
@@ -547,18 +556,8 @@ static void build_main_screen() {
   lv_obj_set_style_arc_rounded(s_vol_arc, true, LV_PART_INDICATOR);
   lv_obj_set_style_bg_opa(s_vol_arc, LV_OPA_TRANSP, LV_PART_KNOB);
 
-  // ── WiFi dot — tiny status indicator, top center ──
-  s_wifi_dot = lv_obj_create(s_screen);
-  lv_obj_set_size(s_wifi_dot, 8, 8);
-  lv_obj_set_style_radius(s_wifi_dot, LV_RADIUS_CIRCLE, LV_PART_MAIN);
-  lv_obj_set_style_bg_color(s_wifi_dot, COL_TEXT_SEC, LV_PART_MAIN);
-  lv_obj_set_style_bg_opa(s_wifi_dot, LV_OPA_COVER, LV_PART_MAIN);
-  lv_obj_set_style_border_width(s_wifi_dot, 0, LV_PART_MAIN);
-  lv_obj_remove_flag(s_wifi_dot, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_align(s_wifi_dot, LV_ALIGN_TOP_MID, 0, 36);
-
   // ── Station logo — rounded card with colored shadow ──
-  s_logo_container = lv_obj_create(s_screen);
+  s_logo_container = lv_obj_create(parent);
   lv_obj_set_size(s_logo_container, 100, 100);
   lv_obj_set_style_radius(s_logo_container, 20, LV_PART_MAIN);
   lv_obj_set_style_bg_opa(s_logo_container, LV_OPA_TRANSP, LV_PART_MAIN);
@@ -581,18 +580,17 @@ static void build_main_screen() {
   set_logo(0);
 
   // ── Clock — large centered time, visible when idle ──
-  s_lbl_clock = lv_label_create(s_screen);
+  s_lbl_clock = lv_label_create(parent);
   lv_obj_set_style_text_color(s_lbl_clock, COL_TEXT, LV_PART_MAIN);
-  lv_obj_set_style_text_font(s_lbl_clock, &lv_font_montserrat_48, LV_PART_MAIN);
+  lv_obj_set_style_text_font(s_lbl_clock, &geist_mono_medium_48, LV_PART_MAIN);
   lv_obj_set_style_text_opa(s_lbl_clock, LV_OPA_90, LV_PART_MAIN);
   lv_label_set_text(s_lbl_clock, "00:00");
   lv_obj_align(s_lbl_clock, LV_ALIGN_CENTER, 0, -20);
 
   // ── Station name ──
-  s_lbl_station = lv_label_create(s_screen);
+  s_lbl_station = lv_label_create(parent);
   lv_obj_set_style_text_color(s_lbl_station, COL_TEXT, LV_PART_MAIN);
-  lv_obj_set_style_text_font(s_lbl_station, &lv_font_montserrat_24,
-                             LV_PART_MAIN);
+  lv_obj_set_style_text_font(s_lbl_station, &geist_medium_24, LV_PART_MAIN);
   lv_obj_set_width(s_lbl_station, LCD_H_RES - 80);
   lv_label_set_long_mode(s_lbl_station, LV_LABEL_LONG_SCROLL_CIRCULAR);
   lv_obj_set_style_text_align(s_lbl_station, LV_TEXT_ALIGN_CENTER,
@@ -601,32 +599,63 @@ static void build_main_screen() {
   lv_obj_align(s_lbl_station, LV_ALIGN_CENTER, 0, 68);
 
   // ── Subtitle — play state or "Tap to play" in browse mode ──
-  s_lbl_subtitle = lv_label_create(s_screen);
+  s_lbl_subtitle = lv_label_create(parent);
   lv_obj_set_style_text_color(s_lbl_subtitle, lv_color_hex(0xAAAAAA),
                               LV_PART_MAIN);
-  lv_obj_set_style_text_font(s_lbl_subtitle, &lv_font_montserrat_14,
-                             LV_PART_MAIN);
+  lv_obj_set_style_text_font(s_lbl_subtitle, &geist_regular_14, LV_PART_MAIN);
   lv_label_set_text(s_lbl_subtitle, "");
   lv_obj_align(s_lbl_subtitle, LV_ALIGN_CENTER, 0, 94);
 
   // ── Position indicator (browse mode only) ──
-  s_lbl_position = lv_label_create(s_screen);
+  s_lbl_position = lv_label_create(parent);
   lv_obj_set_style_text_color(s_lbl_position, lv_color_hex(0x888888),
                               LV_PART_MAIN);
-  lv_obj_set_style_text_font(s_lbl_position, &lv_font_montserrat_14,
-                             LV_PART_MAIN);
+  lv_obj_set_style_text_font(s_lbl_position, &geist_regular_14, LV_PART_MAIN);
   lv_label_set_text(s_lbl_position, "");
   lv_obj_align(s_lbl_position, LV_ALIGN_CENTER, 0, 116);
   lv_obj_add_flag(s_lbl_position, LV_OBJ_FLAG_HIDDEN);
 
   // ── Speaker name — bottom, very subtle ──
-  s_lbl_speaker = lv_label_create(s_screen);
+  s_lbl_speaker = lv_label_create(parent);
   lv_obj_set_style_text_color(s_lbl_speaker, COL_TEXT_SEC, LV_PART_MAIN);
-  lv_obj_set_style_text_font(s_lbl_speaker, &lv_font_montserrat_14,
-                             LV_PART_MAIN);
+  lv_obj_set_style_text_font(s_lbl_speaker, &geist_regular_14, LV_PART_MAIN);
   lv_obj_set_style_text_opa(s_lbl_speaker, LV_OPA_60, LV_PART_MAIN);
   lv_label_set_text(s_lbl_speaker, "");
   lv_obj_align(s_lbl_speaker, LV_ALIGN_BOTTOM_MID, 0, -36);
+}
+
+static void home_page_destroy() { s_home = nullptr; }
+
+static const PageDef s_home_page = {
+    .id = "home",
+    .build = home_page_build,
+    .destroy = home_page_destroy,
+    .tick = nullptr,
+};
+
+static void build_main_screen() {
+  s_screen = lv_obj_create(nullptr);
+  lv_obj_set_style_bg_color(s_screen, COL_BG, LV_PART_MAIN);
+  lv_obj_remove_flag(s_screen, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_size(s_screen, LCD_H_RES, LCD_V_RES);
+  lv_obj_add_flag(s_screen, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_event_cb(s_screen, on_screen_pressed, LV_EVENT_PRESSED, nullptr);
+  lv_obj_add_event_cb(s_screen, on_screen_released, LV_EVENT_RELEASED, nullptr);
+
+  // Pager: creates the horizontal strip and builds home page into it
+  pages_init(s_screen, &s_home_page, on_page_changed);
+
+  // ── Overlays (above pager strip) ──
+
+  // ── WiFi dot — tiny status indicator, top center ──
+  s_wifi_dot = lv_obj_create(s_screen);
+  lv_obj_set_size(s_wifi_dot, 8, 8);
+  lv_obj_set_style_radius(s_wifi_dot, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(s_wifi_dot, COL_TEXT_SEC, LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(s_wifi_dot, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_border_width(s_wifi_dot, 0, LV_PART_MAIN);
+  lv_obj_remove_flag(s_wifi_dot, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_align(s_wifi_dot, LV_ALIGN_TOP_MID, 0, 36);
 }
 
 // ─── Speaker Picker (first boot only) ───────────────────────────────────────
@@ -680,7 +709,7 @@ static void rebuild_speaker_list() {
 
   lv_obj_t *title = lv_label_create(s_scr_speaker_picker);
   lv_obj_set_style_text_color(title, COL_TEXT, LV_PART_MAIN);
-  lv_obj_set_style_text_font(title, &lv_font_montserrat_20, LV_PART_MAIN);
+  lv_obj_set_style_text_font(title, &geist_regular_20, LV_PART_MAIN);
   lv_label_set_text(title, "Select Speaker");
 
   for (int i = 0; i < s_discovered.count; i++) {
@@ -780,7 +809,8 @@ void ui_init() {
 void ui_set_volume(int level) {
   if (display_lock(50)) {
     s_volume = level;
-    lv_arc_set_value(s_vol_arc, level);
+    if (pages_is_home() && s_vol_arc)
+      lv_arc_set_value(s_vol_arc, level);
     display_unlock();
   }
 }
@@ -859,6 +889,14 @@ void ui_voice_set_transcript(const char *text, bool is_user) {
 
 bool ui_is_voice_active() { return s_mode == Mode::Voice; }
 
+static void on_page_changed(int index, const char *id) {
+  (void)id;
+  if (index == 0) {
+    show_idle_ui(home_should_idle());
+    update_subtitle();
+  }
+}
+
 void ui_on_encoder_rotate(int32_t steps) {
   if (!display_lock(50))
     return;
@@ -878,6 +916,16 @@ void ui_on_encoder_rotate(int32_t steps) {
     display_unlock();
     return;
   }
+
+  // If we're on a live view page, encoder navigates between pages
+  if (!pages_is_home()) {
+    pages_navigate(steps > 0 ? 1 : -1);
+    pages_poke();
+    display_unlock();
+    return;
+  }
+
+  pages_poke();
 
   switch (s_mode) {
   case Mode::Volume: {
@@ -925,8 +973,11 @@ void ui_on_encoder_rotate(int32_t steps) {
 void ui_on_touch_tap() {
   if (!display_lock(50))
     return;
+  pages_poke();
   if (s_mode == Mode::Voice)
     deactivate_voice();
+  else if (!pages_is_home())
+    pages_go_home();
   else
     do_tap();
   display_unlock();
