@@ -1,5 +1,6 @@
 idf_component_register(
     SRCS
+        "app_events.cpp"
         "ui.cpp"
         "ui_pages.cpp"
         "ui_timer.cpp"
