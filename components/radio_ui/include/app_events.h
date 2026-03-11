@@ -1,11 +1,13 @@
 #pragma once
 
+#include "esp_event.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/* Event base for app events (used by both C and Rust) */
-#define APP_EVENT_BASE "APP_EVENT"
+/* Event base declaration — defined in app_events.cpp */
+ESP_EVENT_DECLARE_BASE(RADIO_EVENT);
 
 typedef enum {
     /* Input events (C -> Rust) */
