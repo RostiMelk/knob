@@ -1,4 +1,4 @@
 #pragma once
 
-// Forwarding header — resolves #include "input/haptic.h" to the flat header
-#include "haptic.h"
+void haptic_init();
+void haptic_buzz();
