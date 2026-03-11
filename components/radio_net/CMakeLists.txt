@@ -8,6 +8,7 @@ idf_component_register(
         driver
         esp_event
         esp_http_client
+        esp_timer
         esp_wifi
         nvs_flash
     PRIV_REQUIRES
