@@ -19,10 +19,10 @@ idf_component_register(
         esp_lcd
         esp_timer
         nvs_flash
-    PRIV_REQUIRES
-        esp_psram
         radio_net
         radio_input
+    PRIV_REQUIRES
+        esp_psram
 )
 
 target_compile_options(${COMPONENT_LIB} PRIVATE

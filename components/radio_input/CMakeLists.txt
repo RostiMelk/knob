@@ -7,7 +7,6 @@ idf_component_register(
         driver
         esp_event
         esp_timer
-    PRIV_REQUIRES
         radio_ui
 )
 
