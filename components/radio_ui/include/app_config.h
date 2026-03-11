@@ -1,6 +1,7 @@
 #pragma once
 
 #include "esp_event.h"
+#include "esp_timer.h"
 #include <cstdint>
 
 // ─── Display: ST77916 QSPI 360×360 ─────────────────────────────────────────
