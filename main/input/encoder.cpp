@@ -32,7 +32,7 @@ static void on_poll(void *) {
   // Each non-zero delta is one step.
   int32_t steps = (delta > 0) ? 1 : -1;
 
-  ESP_LOGI(TAG, "step: delta=%d steps=%" PRId32, delta, steps);
+  ESP_LOGI(TAG, "step: count=%d delta=%d steps=%" PRId32, count, delta, steps);
   esp_event_post(APP_EVENT, APP_EVENT_ENCODER_ROTATE, &steps, sizeof(steps), 0);
 }
 
@@ -44,12 +44,14 @@ static void init_pcnt() {
   ESP_ERROR_CHECK(pcnt_new_unit(&unit_cfg, &s_pcnt_unit));
 
   pcnt_glitch_filter_config_t filter_cfg = {};
-  filter_cfg.max_glitch_ns = 10'000;
+  filter_cfg.max_glitch_ns = 50'000;
   ESP_ERROR_CHECK(pcnt_unit_set_glitch_filter(s_pcnt_unit, &filter_cfg));
 
+  // Channel A: edge on B, level on A (swapped from original — fixes
+  // oscillation where each detent produced +1 then -1 instead of accumulating)
   pcnt_chan_config_t chan_a_cfg = {};
-  chan_a_cfg.edge_gpio_num = PIN_ENC_A;
-  chan_a_cfg.level_gpio_num = PIN_ENC_B;
+  chan_a_cfg.edge_gpio_num = PIN_ENC_B;
+  chan_a_cfg.level_gpio_num = PIN_ENC_A;
   pcnt_channel_handle_t chan_a;
   ESP_ERROR_CHECK(pcnt_new_channel(s_pcnt_unit, &chan_a_cfg, &chan_a));
   ESP_ERROR_CHECK(
@@ -59,9 +61,10 @@ static void init_pcnt() {
       pcnt_channel_set_level_action(chan_a, PCNT_CHANNEL_LEVEL_ACTION_KEEP,
                                     PCNT_CHANNEL_LEVEL_ACTION_INVERSE));
 
+  // Channel B: edge on A, level on B
   pcnt_chan_config_t chan_b_cfg = {};
-  chan_b_cfg.edge_gpio_num = PIN_ENC_B;
-  chan_b_cfg.level_gpio_num = PIN_ENC_A;
+  chan_b_cfg.edge_gpio_num = PIN_ENC_A;
+  chan_b_cfg.level_gpio_num = PIN_ENC_B;
   pcnt_channel_handle_t chan_b;
   ESP_ERROR_CHECK(pcnt_new_channel(s_pcnt_unit, &chan_b_cfg, &chan_b));
   ESP_ERROR_CHECK(
@@ -90,6 +93,6 @@ void encoder_init() {
   ESP_ERROR_CHECK(
       esp_timer_start_periodic(s_poll_timer, POLL_INTERVAL_MS * 1000LL));
 
-  ESP_LOGI(TAG, "Encoder ready (A=%d B=%d, poll=%dms, 1 count/detent)",
+  ESP_LOGI(TAG, "Encoder ready (A=%d B=%d swapped, poll=%dms, filter=50us)",
            PIN_ENC_A, PIN_ENC_B, POLL_INTERVAL_MS);
 }
