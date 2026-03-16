@@ -306,6 +306,7 @@ static void init_lcd() {
 
   ESP_ERROR_CHECK(esp_lcd_panel_reset(s_panel));
   ESP_ERROR_CHECK(esp_lcd_panel_init(s_panel));
+  ESP_ERROR_CHECK(esp_lcd_panel_mirror(s_panel, true, true));
   ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(s_panel, true));
 
   set_backlight(80);
@@ -339,8 +340,6 @@ static void init_touch_hw() {
   touch_cfg.y_max = LCD_V_RES;
   touch_cfg.rst_gpio_num = static_cast<gpio_num_t>(PIN_TOUCH_RST);
   touch_cfg.int_gpio_num = static_cast<gpio_num_t>(PIN_TOUCH_INT);
-  touch_cfg.flags.mirror_x = true;
-  touch_cfg.flags.mirror_y = true;
 
   ESP_ERROR_CHECK(
       esp_lcd_touch_new_i2c_cst816s(touch_io, &touch_cfg, &s_touch));

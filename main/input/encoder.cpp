@@ -24,11 +24,13 @@ static void on_poll(void *) {
   if (delta == 0)
     return;
 
-  s_last_count = count;
-
-  int32_t steps = delta / 2;
+  // Quadrature encoder: 4 counts per detent. Only emit whole-detent steps
+  // to avoid jitter/bounce causing spurious events.
+  int32_t steps = delta / 4;
   if (steps == 0)
-    steps = (delta > 0) ? 1 : -1;
+    return;
+
+  s_last_count += steps * 4; // consume only full detents
 
   esp_event_post(APP_EVENT, APP_EVENT_ENCODER_ROTATE, &steps, sizeof(steps), 0);
 }
