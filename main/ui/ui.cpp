@@ -715,6 +715,7 @@ static void on_speaker_tap(lv_event_t *e) {
   auto &speaker = s_discovered.speakers[index];
   sonos_set_speaker(speaker.ip, speaker.port);
   settings_set_speaker_name(speaker.name);
+  sonos_start(); // Start network task (idempotent — safe if already running)
   lv_label_set_text(s_lbl_speaker, speaker.name);
 
   s_on_picker = false;
