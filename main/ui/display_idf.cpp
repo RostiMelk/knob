@@ -323,8 +323,13 @@ static void init_touch_hw() {
   ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &s_i2c_bus));
 
   esp_lcd_panel_io_i2c_config_t io_cfg = {};
-  io_cfg.scl_speed_hz = TOUCH_I2C_FREQ;
   io_cfg.dev_addr = TOUCH_I2C_ADDR;
+  io_cfg.scl_speed_hz = TOUCH_I2C_FREQ;
+  io_cfg.control_phase_bytes = 1;
+  io_cfg.dc_bit_offset = 0;
+  io_cfg.lcd_cmd_bits = 8;
+  io_cfg.lcd_param_bits = 8;
+  io_cfg.flags.disable_control_phase = 1;
 
   esp_lcd_panel_io_handle_t touch_io;
   ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(s_i2c_bus, &io_cfg, &touch_io));
