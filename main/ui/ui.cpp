@@ -691,6 +691,13 @@ static void highlight_picker_item(int highlight) {
   }
 }
 
+static void on_skip_tap(lv_event_t *) {
+  s_on_picker = false;
+  lv_label_set_text(s_lbl_speaker, "No speaker");
+  lv_screen_load_anim(s_screen, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 200, 0, false);
+  ESP_LOGI(TAG, "Speaker picker skipped");
+}
+
 static void rebuild_speaker_list() {
   if (s_scr_speaker_picker)
     lv_obj_delete(s_scr_speaker_picker);
@@ -738,6 +745,25 @@ static void rebuild_speaker_list() {
     lv_label_set_text(lbl, "No speakers found.\nCheck your network.");
     lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
   }
+
+  // "Skip" button — always shown so user can dismiss picker
+  lv_obj_t *skip_btn = lv_obj_create(s_scr_speaker_picker);
+  lv_obj_set_size(skip_btn, LCD_H_RES - 100, 48);
+  lv_obj_set_style_bg_color(skip_btn, COL_BG, LV_PART_MAIN);
+  lv_obj_set_style_border_color(skip_btn, COL_TEXT_SEC, LV_PART_MAIN);
+  lv_obj_set_style_border_width(skip_btn, 1, LV_PART_MAIN);
+  lv_obj_set_style_radius(skip_btn, 12, LV_PART_MAIN);
+  lv_obj_remove_flag(skip_btn, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_add_flag(skip_btn, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_style_bg_color(skip_btn, COL_ACCENT,
+                            static_cast<lv_style_selector_t>(LV_PART_MAIN | LV_STATE_PRESSED));
+
+  lv_obj_t *skip_lbl = lv_label_create(skip_btn);
+  lv_obj_set_style_text_color(skip_lbl, COL_TEXT_SEC, LV_PART_MAIN);
+  lv_label_set_text(skip_lbl, "Skip");
+  lv_obj_center(skip_lbl);
+
+  lv_obj_add_event_cb(skip_btn, on_skip_tap, LV_EVENT_CLICKED, nullptr);
 }
 
 // ─── Scanning Overlay ───────────────────────────────────────────────────────────────
