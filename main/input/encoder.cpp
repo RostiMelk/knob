@@ -1,7 +1,7 @@
 #include "encoder.h"
 #include "app_config.h"
 
-#include "driver/pulse_cnt.h"
+#include "driver/gpio.h"
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -10,78 +10,88 @@
 
 static constexpr const char *TAG = "encoder";
 
-static constexpr int PCNT_HIGH_LIMIT = 100;
-static constexpr int PCNT_LOW_LIMIT = -100;
-static constexpr int POLL_INTERVAL_MS = 20;
+// Waveshare Knob-Touch-LCD-1.8 uses a bidirectional switch encoder,
+// NOT a standard quadrature encoder. Pin A fires on CW rotation,
+// pin B fires on CCW rotation. Each pin produces a brief pulse (low→high→low)
+// per detent in its direction. We detect rising edges with software debounce.
+//
+// Reference: Waveshare demo bidi_switch_knob.c
 
-static pcnt_unit_handle_t s_pcnt_unit;
+static constexpr int POLL_INTERVAL_MS = 3; // Match Waveshare demo (3ms)
+static constexpr int DEBOUNCE_TICKS = 2;   // Consecutive readings before accept
+
 static esp_timer_handle_t s_poll_timer;
-static int s_last_count;
 
-static void on_poll(void *) {
-  int count = 0;
-  pcnt_unit_get_count(s_pcnt_unit, &count);
+// Per-channel state
+struct ChannelState {
+  uint8_t prev_level;
+  uint8_t debounce_cnt;
+};
 
-  int delta = count - s_last_count;
-  if (delta == 0)
-    return;
+static ChannelState s_chan_a;
+static ChannelState s_chan_b;
 
-  s_last_count = count;
+// Process one encoder channel: detect rising edge with debounce
+// Returns true if a valid edge was detected
+static bool process_channel(gpio_num_t pin, ChannelState &ch) {
+  uint8_t level = gpio_get_level(pin);
 
-  // This encoder produces 1 count per detent (confirmed via serial log).
-  // Each non-zero delta is one step.
-  int32_t steps = (delta > 0) ? 1 : -1;
+  if (level == 0) {
+    // Pin is low — reset debounce if it changed, otherwise count
+    if (level != ch.prev_level)
+      ch.debounce_cnt = 0;
+    else
+      ch.debounce_cnt++;
+  } else {
+    // Pin is high — check for debounced rising edge
+    if (level != ch.prev_level && ++ch.debounce_cnt >= DEBOUNCE_TICKS) {
+      ch.debounce_cnt = 0;
+      ch.prev_level = level;
+      return true; // Valid rising edge
+    } else {
+      ch.debounce_cnt = 0;
+    }
+  }
 
-  ESP_LOGI(TAG, "step: count=%d delta=%d steps=%" PRId32, count, delta, steps);
-  esp_event_post(APP_EVENT, APP_EVENT_ENCODER_ROTATE, &steps, sizeof(steps), 0);
+  ch.prev_level = level;
+  return false;
 }
 
-static void init_pcnt() {
-  pcnt_unit_config_t unit_cfg = {};
-  unit_cfg.high_limit = PCNT_HIGH_LIMIT;
-  unit_cfg.low_limit = PCNT_LOW_LIMIT;
-  unit_cfg.flags.accum_count = 1;
-  ESP_ERROR_CHECK(pcnt_new_unit(&unit_cfg, &s_pcnt_unit));
+static void on_poll(void *) {
+  bool cw = process_channel(static_cast<gpio_num_t>(PIN_ENC_A), s_chan_a);
+  bool ccw = process_channel(static_cast<gpio_num_t>(PIN_ENC_B), s_chan_b);
 
-  // Glitch filter: 1000ns (1µs) — ESP32-S3 PCNT max is ~12.7µs at 80MHz APB
-  pcnt_glitch_filter_config_t filter_cfg = {};
-  filter_cfg.max_glitch_ns = 1000;
-  ESP_ERROR_CHECK(pcnt_unit_set_glitch_filter(s_pcnt_unit, &filter_cfg));
+  if (cw) {
+    int32_t steps = 1;
+    ESP_LOGI(TAG, "step: CW (+1)");
+    esp_event_post(APP_EVENT, APP_EVENT_ENCODER_ROTATE, &steps, sizeof(steps),
+                   0);
+  }
+  if (ccw) {
+    int32_t steps = -1;
+    ESP_LOGI(TAG, "step: CCW (-1)");
+    esp_event_post(APP_EVENT, APP_EVENT_ENCODER_ROTATE, &steps, sizeof(steps),
+                   0);
+  }
+}
 
-  // Channel A: edge on B, level on A (swapped from original — fixes
-  // oscillation where each detent produced +1 then -1 instead of accumulating)
-  pcnt_chan_config_t chan_a_cfg = {};
-  chan_a_cfg.edge_gpio_num = PIN_ENC_B;
-  chan_a_cfg.level_gpio_num = PIN_ENC_A;
-  pcnt_channel_handle_t chan_a;
-  ESP_ERROR_CHECK(pcnt_new_channel(s_pcnt_unit, &chan_a_cfg, &chan_a));
-  ESP_ERROR_CHECK(
-      pcnt_channel_set_edge_action(chan_a, PCNT_CHANNEL_EDGE_ACTION_DECREASE,
-                                   PCNT_CHANNEL_EDGE_ACTION_INCREASE));
-  ESP_ERROR_CHECK(
-      pcnt_channel_set_level_action(chan_a, PCNT_CHANNEL_LEVEL_ACTION_KEEP,
-                                    PCNT_CHANNEL_LEVEL_ACTION_INVERSE));
+static void init_gpio() {
+  gpio_config_t cfg = {};
+  cfg.pin_bit_mask = (1ULL << PIN_ENC_A) | (1ULL << PIN_ENC_B);
+  cfg.mode = GPIO_MODE_INPUT;
+  cfg.pull_up_en = GPIO_PULLUP_ENABLE;
+  cfg.intr_type = GPIO_INTR_DISABLE;
+  ESP_ERROR_CHECK(gpio_config(&cfg));
 
-  // Channel B: edge on A, level on B
-  pcnt_chan_config_t chan_b_cfg = {};
-  chan_b_cfg.edge_gpio_num = PIN_ENC_A;
-  chan_b_cfg.level_gpio_num = PIN_ENC_B;
-  pcnt_channel_handle_t chan_b;
-  ESP_ERROR_CHECK(pcnt_new_channel(s_pcnt_unit, &chan_b_cfg, &chan_b));
-  ESP_ERROR_CHECK(
-      pcnt_channel_set_edge_action(chan_b, PCNT_CHANNEL_EDGE_ACTION_INCREASE,
-                                   PCNT_CHANNEL_EDGE_ACTION_DECREASE));
-  ESP_ERROR_CHECK(
-      pcnt_channel_set_level_action(chan_b, PCNT_CHANNEL_LEVEL_ACTION_KEEP,
-                                    PCNT_CHANNEL_LEVEL_ACTION_INVERSE));
-
-  ESP_ERROR_CHECK(pcnt_unit_enable(s_pcnt_unit));
-  ESP_ERROR_CHECK(pcnt_unit_clear_count(s_pcnt_unit));
-  ESP_ERROR_CHECK(pcnt_unit_start(s_pcnt_unit));
+  // Initialize channel state with current levels
+  s_chan_a.prev_level = gpio_get_level(static_cast<gpio_num_t>(PIN_ENC_A));
+  s_chan_b.prev_level = gpio_get_level(static_cast<gpio_num_t>(PIN_ENC_B));
+  s_chan_a.debounce_cnt = 0;
+  s_chan_b.debounce_cnt = 0;
 }
 
 void encoder_init() {
-  init_pcnt();
+  init_gpio();
 
   const esp_timer_create_args_t poll_args = {
       .callback = on_poll,
@@ -94,6 +104,7 @@ void encoder_init() {
   ESP_ERROR_CHECK(
       esp_timer_start_periodic(s_poll_timer, POLL_INTERVAL_MS * 1000LL));
 
-  ESP_LOGI(TAG, "Encoder ready (A=%d B=%d swapped, poll=%dms, filter=1us)",
-           PIN_ENC_A, PIN_ENC_B, POLL_INTERVAL_MS);
+  ESP_LOGI(TAG,
+           "Encoder ready (A=%d B=%d, bidi-switch mode, poll=%dms, debounce=%d)",
+           PIN_ENC_A, PIN_ENC_B, POLL_INTERVAL_MS, DEBOUNCE_TICKS);
 }
