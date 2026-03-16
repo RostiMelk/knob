@@ -51,3 +51,7 @@ target_compile_options(${COMPONENT_LIB} PUBLIC
     -fno-exceptions
     -fno-rtti
 )
+
+# Pack assets/logos/ into the "storage" SPIFFS partition at flash time.
+# Files inside assets/logos/ appear at the SPIFFS root, e.g. /spiffs/nrk_p1.png
+spiffs_create_partition_image(storage ${CMAKE_SOURCE_DIR}/assets/logos FLASH_IN_PROJECT)
