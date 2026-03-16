@@ -122,7 +122,7 @@ static bool s_on_picker;
 #ifdef SIMULATOR
 static constexpr const char *LOGO_DIR = "A:assets/logos/";
 #else
-static constexpr const char *LOGO_DIR = "A:/sdcard/logos/";
+static constexpr const char *LOGO_DIR = "A:/spiffs/";
 #endif
 
 static char s_logo_path[128];
@@ -131,7 +131,7 @@ static char s_bg_path[128];
 #ifdef SIMULATOR
 static constexpr const char *BG_DIR = "A:assets/logos/bg/";
 #else
-static constexpr const char *BG_DIR = "A:/sdcard/logos/bg/";
+static constexpr const char *BG_DIR = "A:/spiffs/bg/";
 #endif
 
 static void set_logo(int index) {
