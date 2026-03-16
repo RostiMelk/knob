@@ -14,3 +14,4 @@ __pycache__/
 *.map
 *.bin
 *.elf
+*.log
