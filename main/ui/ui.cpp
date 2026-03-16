@@ -36,9 +36,9 @@ enum class Mode { Volume, Browse, Voice };
 
 static constexpr int BROWSE_TIMEOUT_MS = 7000;
 static constexpr int VOL_DISPLAY_MS = 1500;
-static constexpr int ANIM_FADE_MS = 200;
-static constexpr int ANIM_QUICK_MS = 100;
-static constexpr int ANIM_ARC_FADE_MS = 400;
+static constexpr int ANIM_FADE_MS = 0;      // DIAGNOSTIC: was 280
+static constexpr int ANIM_QUICK_MS = 0;     // DIAGNOSTIC: was 120
+static constexpr int ANIM_ARC_FADE_MS = 0;  // DIAGNOSTIC: was 600
 
 // ─── Palette ────────────────────────────────────────────────────────────────────────────
 
@@ -160,38 +160,6 @@ static void set_logo(int index) {
   ESP_LOGI("PERF", "set_logo[%d]: logo=%lld us  bg=%lld us  total=%lld us",
            index, (long long)(t1 - t0), (long long)(t2 - t1),
            (long long)(t2 - t0));
-}
-
-// ─── Cache Pre-warm ──────────────────────────────────────────────────────────────────
-
-// Pre-load all station images into LVGL cache at boot.
-// SPIFFS reads take ~120ms per station on first access, but are instant once cached.
-// 11 stations × ~150ms ≈ 1.6s — runs while speaker picker is showing so user doesn't notice.
-static void preload_all_logos() {
-  int64_t t0 = esp_timer_get_time();
-  char path[128];
-  for (int i = 0; i < STATION_COUNT; i++) {
-    const char *logo_file = STATIONS[i].logo;
-    const char *ext = strrchr(logo_file, '.');
-    size_t base_len =
-        ext ? static_cast<size_t>(ext - logo_file) : strlen(logo_file);
-
-    // Pre-warm logo
-    snprintf(path, sizeof(path), "%s%.*s.bin", LOGO_DIR,
-             static_cast<int>(base_len), logo_file);
-    lv_image_cache_drop(path); // ensure fresh load
-    lv_image_header_t hdr = {};
-    lv_image_decoder_get_info(path, &hdr);
-
-    // Pre-warm background
-    snprintf(path, sizeof(path), "%s%.*s_bg.bin", BG_DIR,
-             static_cast<int>(base_len), logo_file);
-    lv_image_cache_drop(path);
-    lv_image_decoder_get_info(path, &hdr);
-  }
-  int64_t t1 = esp_timer_get_time();
-  ESP_LOGI(TAG, "Preloaded %d station images in %lld ms",
-           STATION_COUNT, (long long)(t1 - t0) / 1000);
 }
 
 // ─── Forward Declarations ─────────────────────────────────────────────────────────────
@@ -896,9 +864,6 @@ void ui_init() {
     voice_ui_build(s_screen);
 
     show_idle_ui(true);
-
-    // Pre-warm image cache while speaker picker is showing
-    preload_all_logos();
 
     char saved_name[64] = {};
     settings_get_speaker_name(saved_name, sizeof(saved_name));
