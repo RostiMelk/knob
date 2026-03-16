@@ -17,7 +17,7 @@ constexpr int PIN_LCD_BL = 47;
 constexpr int LCD_H_RES = 360;
 constexpr int LCD_V_RES = 360;
 constexpr int LCD_DRAW_ROWS =
-    36; // partial rows per flush — fits in internal DMA RAM
+    72; // partial rows per flush — 5 flushes/frame, ~52KB per DMA buffer
 constexpr int LCD_BL_LEDC_CH = 0;
 
 // ─── Touch: CST816D I2C ─────────────────────────────────────────────────────
