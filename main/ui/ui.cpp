@@ -10,6 +10,7 @@
 #include "ui_voice.h"
 
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "lvgl.h"
 
 #include <algorithm>
@@ -147,11 +148,18 @@ static void set_logo(int index) {
       ext ? static_cast<size_t>(ext - logo_file) : strlen(logo_file);
   snprintf(s_logo_path, sizeof(s_logo_path), "%s%.*s.bin", LOGO_DIR,
            static_cast<int>(base_len), logo_file);
+  int64_t t0 = esp_timer_get_time();
   lv_image_set_src(s_img_logo, s_logo_path);
+  int64_t t1 = esp_timer_get_time();
 
   snprintf(s_bg_path, sizeof(s_bg_path), "%s%.*s_bg.bin", BG_DIR,
            static_cast<int>(base_len), logo_file);
   lv_image_set_src(s_bg_img, s_bg_path);
+  int64_t t2 = esp_timer_get_time();
+
+  ESP_LOGI("PERF", "set_logo[%d]: logo=%lld us  bg=%lld us  total=%lld us",
+           index, (long long)(t1 - t0), (long long)(t2 - t1),
+           (long long)(t2 - t0));
 }
 
 // ─── Forward Declarations ─────────────────────────────────────────────────────────────
