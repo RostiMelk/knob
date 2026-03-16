@@ -90,6 +90,53 @@ Simulator code lives in `sim/`. UI screens are duplicated from `main/ui/` — ke
 
 ## Build & Flash (hardware)
 
+Use `flash.sh` — it handles everything automatically. Raw `idf.py` commands are listed at the bottom as a fallback.
+
+### flash.sh
+
+`flash.sh` is a build/flash/monitor helper that:
+
+1. **Checks prerequisites** — verifies ESP-IDF, the Rust ESP toolchain, and `ldproxy` are installed
+2. **Sources ESP-IDF** — runs `export.sh` automatically if `$IDF_PATH` isn't already set
+3. **Detects the correct USB port** — probes connected serial ports with `esptool.py` to find the ESP32-S3
+4. **Builds** — runs `idf.py build` (sets target to `esp32s3` on first run)
+5. **Flashes** — runs `idf.py flash` on the detected port
+6. **Monitors** (optional) — opens the serial monitor via `idf.py monitor`
+
+#### First-time setup
+
+GitHub does not preserve file permissions. After cloning, make the script executable:
+
+```
+chmod +x flash.sh
+```
+
+#### Usage
+
+```
+./flash.sh                        # build + flash
+./flash.sh --monitor              # build + flash + open serial monitor
+./flash.sh -m                     # same as --monitor
+./flash.sh --build-only           # build only, no flash
+./flash.sh --log serial.log       # build + flash + monitor, save output to file (implies --monitor)
+./flash.sh --help                 # show usage
+```
+
+#### Exiting the monitor
+
+Press **Ctrl+T** then **Ctrl+X**.
+
+#### USB-C cable orientation quirk
+
+This board has a single USB-C port connected to a CH445P analog switch. The cable orientation determines which chip is exposed:
+
+- **One way** → ESP32-S3 (main MCU — correct for flashing)
+- **Flipped** → ESP32 co-processor (wrong chip)
+
+`flash.sh` detects this automatically. If it finds the co-processor instead of the ESP32-S3, it will print a warning and tell you to flip the cable.
+
+### Raw idf.py commands (fallback)
+
 ```
 idf.py set-target esp32s3
 idf.py build
