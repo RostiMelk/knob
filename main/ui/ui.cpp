@@ -141,17 +141,52 @@ static void set_logo(int index) {
   const char *logo_file = STATIONS[index].logo;
   snprintf(s_logo_path, sizeof(s_logo_path), "%s%s", LOGO_DIR, logo_file);
 
-  // Debug: check if file exists before passing to LVGL
+  // ── Debug: POSIX file check ──
   const char *posix_path = s_logo_path + 2; // skip "A:" prefix
-  FILE *f = fopen(posix_path, "r");
+  FILE *f = fopen(posix_path, "rb");
   if (f) {
+    // Check PNG signature (first 8 bytes: 89 50 4E 47 0D 0A 1A 0A)
+    uint8_t hdr[8] = {};
+    size_t n = fread(hdr, 1, 8, f);
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
     fclose(f);
-    ESP_LOGI(TAG, "logo: %s (found)", s_logo_path);
+    bool valid_png = (n == 8 && hdr[0] == 0x89 && hdr[1] == 'P' &&
+                      hdr[2] == 'N' && hdr[3] == 'G');
+    ESP_LOGI(TAG, "logo POSIX: %s size=%ld png=%s hdr=%02x%02x%02x%02x",
+             posix_path, sz, valid_png ? "YES" : "NO",
+             hdr[0], hdr[1], hdr[2], hdr[3]);
   } else {
-    ESP_LOGW(TAG, "logo: %s (NOT FOUND, posix=%s)", s_logo_path, posix_path);
+    ESP_LOGE(TAG, "logo POSIX: %s OPEN FAILED", posix_path);
   }
 
+  // ── Debug: LVGL FS driver check ──
+  bool fs_ready = lv_fs_is_ready('A');
+  ESP_LOGI(TAG, "logo LVGL: fs_ready('A')=%d", fs_ready);
+
+  lv_fs_file_t lv_f;
+  lv_fs_res_t res = lv_fs_open(&lv_f, s_logo_path, LV_FS_MODE_RD);
+  if (res == LV_FS_RES_OK) {
+    uint32_t br = 0;
+    uint8_t lv_hdr[8] = {};
+    lv_fs_read(&lv_f, lv_hdr, 8, &br);
+    lv_fs_close(&lv_f);
+    ESP_LOGI(TAG, "logo LVGL: %s opened OK, read %lu bytes, hdr=%02x%02x%02x%02x",
+             s_logo_path, (unsigned long)br,
+             lv_hdr[0], lv_hdr[1], lv_hdr[2], lv_hdr[3]);
+  } else {
+    ESP_LOGE(TAG, "logo LVGL: %s OPEN FAILED res=%d", s_logo_path, res);
+  }
+
+  // ── Set the image source ──
   lv_image_set_src(s_img_logo, s_logo_path);
+
+  // ── Debug: check result after set_src ──
+  const void *src = lv_image_get_src(s_img_logo);
+  lv_image_header_t header = {};
+  lv_result_t dec_res = lv_image_decoder_get_info(s_logo_path, &header);
+  ESP_LOGI(TAG, "logo result: src=%p dec_res=%d w=%d h=%d cf=%d",
+           src, dec_res, header.w, header.h, header.cf);
 
   const char *dot = strrchr(logo_file, '.');
   size_t base_len =
