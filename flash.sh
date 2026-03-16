@@ -225,6 +225,7 @@ if [ -f "$ENV_FILE" ]; then
   WIFI_SSID=""
   WIFI_PASS=""
   SPEAKER_IP=""
+  TIMEZONE=""
 
   while IFS= read -r line || [ -n "$line" ]; do
     # Skip empty lines and comments
@@ -237,6 +238,7 @@ if [ -f "$ENV_FILE" ]; then
         WIFI_SSID)  WIFI_SSID="$val" ;;
         WIFI_PASS)  WIFI_PASS="$val" ;;
         SPEAKER_IP) SPEAKER_IP="$val" ;;
+        TIMEZONE)   TIMEZONE="$val" ;;
       esac
     fi
   done < "$ENV_FILE"
@@ -270,6 +272,11 @@ if [ -f "$ENV_FILE" ]; then
     INJECTED=true
   fi
 
+  if [ -n "$TIMEZONE" ]; then
+    set_sdkconfig "CONFIG_RADIO_TIMEZONE" "$TIMEZONE"
+    INJECTED=true
+  fi
+
   if [ "$INJECTED" = true ]; then
     # Print summary (mask password)
     if [ -n "$WIFI_SSID" ]; then
@@ -281,6 +288,9 @@ if [ -f "$ENV_FILE" ]; then
     fi
     if [ -n "$SPEAKER_IP" ]; then
       ok "Speaker IP: $SPEAKER_IP"
+    fi
+    if [ -n "$TIMEZONE" ]; then
+      ok "Timezone: $TIMEZONE"
     fi
   else
     warn "No WIFI_SSID, WIFI_PASS, or SPEAKER_IP found in .env"

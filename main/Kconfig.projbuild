@@ -33,4 +33,16 @@ menu "Sonos Radio"
         default 33
         range 0 100
 
+    config RADIO_TIMEZONE
+        string "POSIX timezone string"
+        default "CET-1CEST,M3.5.0,M10.5.0/3"
+        help
+            POSIX TZ string for local time display. Default is Oslo (CET/CEST).
+            See: https://www.gnu.org/software/libc/manual/html_node/TZ-Variable.html
+            Examples:
+              US Eastern:  EST5EDT,M3.2.0,M11.1.0
+              US Pacific:  PST8PDT,M3.2.0,M11.1.0
+              UK:          GMT0BST,M3.5.0/1,M10.5.0
+              Japan:       JST-9
+
 endmenu

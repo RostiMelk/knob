@@ -13,6 +13,7 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_netif_sntp.h"
 #include "nvs_flash.h"
 
 #include "freertos/FreeRTOS.h"
@@ -111,6 +112,17 @@ static void start_with_saved_speaker() {
 static void on_wifi_connected(void *, esp_event_base_t, int32_t, void *) {
   ESP_LOGI(TAG, "WiFi connected");
   ui_set_wifi_status(true);
+
+  // Set timezone and start NTP sync (idempotent — safe on reconnect)
+  setenv("TZ", CONFIG_RADIO_TIMEZONE, 1);
+  tzset();
+  static bool sntp_started = false;
+  if (!sntp_started) {
+    esp_sntp_config_t sntp_cfg = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
+    esp_netif_sntp_init(&sntp_cfg);
+    sntp_started = true;
+    ESP_LOGI(TAG, "SNTP started, TZ=%s", CONFIG_RADIO_TIMEZONE);
+  }
 
   if (settings_has_speaker()) {
     start_with_saved_speaker();
