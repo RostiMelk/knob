@@ -57,7 +57,9 @@ target_compile_options(${COMPONENT_LIB} PUBLIC
 # Output goes to build/spiffs_data/ which gets packed into the SPIFFS partition.
 
 set(SPIFFS_DIR "${CMAKE_BINARY_DIR}/spiffs_data")
-set(LVGL_IMAGE "${CMAKE_SOURCE_DIR}/scripts/LVGLImage.py")
+# LVGLImage.py ships with LVGL — use the managed component copy
+# (downloaded automatically by idf.py build via idf_component.yml)
+set(LVGL_IMAGE "${CMAKE_SOURCE_DIR}/managed_components/lvgl__lvgl/scripts/LVGLImage.py")
 set(LOGO_SRC "${CMAKE_SOURCE_DIR}/assets/logos")
 
 add_custom_command(

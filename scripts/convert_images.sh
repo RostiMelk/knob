@@ -13,7 +13,12 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-LVGL_IMAGE="$SCRIPT_DIR/LVGLImage.py"
+# LVGLImage.py ships with LVGL managed component (downloaded by idf.py build)
+LVGL_IMAGE="$PROJECT_DIR/managed_components/lvgl__lvgl/scripts/LVGLImage.py"
+if [ ! -f "$LVGL_IMAGE" ]; then
+    # Fallback: local copy in scripts/
+    LVGL_IMAGE="$SCRIPT_DIR/LVGLImage.py"
+fi
 OUTPUT_DIR="$PROJECT_DIR/build/spiffs_data"
 
 # Check prerequisites
@@ -23,7 +28,8 @@ if ! python3 -c "import png" 2>/dev/null; then
 fi
 
 if [ ! -f "$LVGL_IMAGE" ]; then
-    echo "ERROR: LVGLImage.py not found at $LVGL_IMAGE"
+    echo "ERROR: LVGLImage.py not found. Run 'idf.py build' first to download LVGL,"
+    echo "       or: curl -o scripts/LVGLImage.py https://raw.githubusercontent.com/lvgl/lvgl/master/scripts/LVGLImage.py"
     exit 1
 fi
 
