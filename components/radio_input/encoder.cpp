@@ -26,20 +26,13 @@ static void on_poll(void *) {
   if (delta == 0)
     return;
 
-  // Log raw values BEFORE threshold — this fires on any movement,
-  // even sub-detent. If you see these but no "steps" lines, the
-  // divisor is wrong for this encoder.
-  ESP_LOGI(TAG, "raw: count=%d last=%d delta=%d", count, s_last_count, delta);
+  s_last_count = count;
 
-  // Quadrature encoder: 4 counts per detent. Only emit whole-detent steps
-  // to avoid jitter/bounce causing spurious events.
-  int32_t steps = delta / 4;
-  if (steps == 0)
-    return;
+  // This encoder produces 1 count per detent (confirmed via serial log).
+  // Each non-zero delta is one step.
+  int32_t steps = (delta > 0) ? 1 : -1;
 
-  s_last_count += steps * 4; // consume only full detents
-
-  ESP_LOGI(TAG, "step: steps=%" PRId32 " (new_last=%d)", steps, s_last_count);
+  ESP_LOGI(TAG, "step: delta=%d steps=%" PRId32, delta, steps);
   esp_event_post(APP_EVENT, APP_EVENT_ENCODER_ROTATE, &steps, sizeof(steps), 0);
 }
 
@@ -97,6 +90,6 @@ void encoder_init() {
   ESP_ERROR_CHECK(
       esp_timer_start_periodic(s_poll_timer, POLL_INTERVAL_MS * 1000LL));
 
-  ESP_LOGI(TAG, "Encoder ready (A=%d B=%d, poll=%dms, divisor=4)",
+  ESP_LOGI(TAG, "Encoder ready (A=%d B=%d, poll=%dms, 1 count/detent)",
            PIN_ENC_A, PIN_ENC_B, POLL_INTERVAL_MS);
 }
