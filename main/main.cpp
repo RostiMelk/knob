@@ -184,6 +184,7 @@ extern "C" void app_main() {
 
   init_nvs();
   settings_init();
+  settings_mount_spiffs();
   settings_load_config_from_sd();
 
   s_volume = settings_get_volume();
