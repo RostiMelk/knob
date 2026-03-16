@@ -282,7 +282,7 @@ static void init_lcd() {
   io_cfg.cs_gpio_num = PIN_LCD_CS;
   io_cfg.dc_gpio_num = -1; // QSPI: no DC pin
   io_cfg.spi_mode = 0;
-  io_cfg.pclk_hz = 40 * 1000 * 1000;
+  io_cfg.pclk_hz = 50 * 1000 * 1000; // ST77916 max QSPI is 50MHz
   io_cfg.trans_queue_depth = 10;
   io_cfg.lcd_cmd_bits = 32;  // QSPI: 32-bit command (opcode + cmd + dummy)
   io_cfg.lcd_param_bits = 8;
@@ -352,7 +352,8 @@ void display_init(lv_display_t **disp, lv_indev_t **touch) {
   init_lcd();
   init_touch_hw();
 
-  const lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
+  lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
+  port_cfg.task_affinity = 1; // Pin LVGL to Core 1 (WiFi runs on Core 0)
   ESP_ERROR_CHECK(lvgl_port_init(&port_cfg));
 
   const lvgl_port_display_cfg_t disp_cfg = {
