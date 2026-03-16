@@ -1,0 +1,11 @@
+# Target-specific overrides for ESP32-S3
+# ESP-IDF merges this ON TOP of sdkconfig.defaults, giving it higher priority.
+# This ensures Kconfig choice blocks resolve correctly even if the component
+# manager's Kconfig resolution resets them.
+
+# LVGL memory: force clib malloc (Kconfig choice — needs explicit unset)
+# Without this, LVGL uses its built-in 64KB TLSF pool instead of PSRAM.
+# CONFIG_LV_USE_BUILTIN_MALLOC is not set
+CONFIG_LV_USE_CLIB_MALLOC=y
+# CONFIG_LV_USE_BUILTIN_STRING is not set
+CONFIG_LV_USE_CLIB_STRING=y
