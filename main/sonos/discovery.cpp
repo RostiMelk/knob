@@ -124,9 +124,9 @@ static bool xml_extract_tag(const char *xml, const char *tag, char *out,
   return true;
 }
 
-static bool fetch_speaker_name(const char *location_url, char *name,
-                               size_t name_len) {
-  static char resp_buf[2048];
+static bool fetch_speaker_info(const char *location_url, char *name,
+                               size_t name_len, bool *invisible) {
+  static char resp_buf[4096]; // larger buffer to capture zone/group info
   HttpBuf buf = {resp_buf, 0, static_cast<int>(sizeof(resp_buf))};
 
   esp_http_client_config_t cfg = {};
@@ -145,6 +145,11 @@ static bool fetch_speaker_name(const char *location_url, char *name,
 
   if (err != ESP_OK || status != 200)
     return false;
+
+  // Check if this is an invisible speaker (stereo pair secondary, sub, etc.)
+  // The device XML contains <invisible>1</invisible> for slave speakers
+  *invisible = (strstr(resp_buf, "<invisible>1</invisible>") != nullptr ||
+                strstr(resp_buf, "Invisible=\"1\"") != nullptr);
 
   if (xml_extract_tag(resp_buf, "roomName", name, name_len))
     return true;
@@ -228,13 +233,23 @@ int discovery_scan(DiscoveryResult *out, int timeout_ms) {
     if (already_found(out, ip))
       continue;
 
+    char name[64] = {};
+    bool invisible = false;
+
+    if (fetch_speaker_info(location, name, sizeof(name), &invisible)) {
+      if (invisible) {
+        ESP_LOGI(TAG, "Skipping invisible speaker: %s at %s:%d (stereo pair secondary)",
+                 name, ip, port);
+        continue;
+      }
+    } else {
+      snprintf(name, sizeof(name), "Sonos (%s)", ip);
+    }
+
     auto &speaker = out->speakers[out->count];
     strncpy(speaker.ip, ip, sizeof(speaker.ip) - 1);
     speaker.port = port;
-
-    if (!fetch_speaker_name(location, speaker.name, sizeof(speaker.name))) {
-      snprintf(speaker.name, sizeof(speaker.name), "Sonos (%s)", ip);
-    }
+    strncpy(speaker.name, name, sizeof(speaker.name) - 1);
 
     ESP_LOGI(TAG, "Found: %s at %s:%d", speaker.name, speaker.ip, speaker.port);
     out->count++;
