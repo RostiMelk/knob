@@ -124,9 +124,9 @@ static bool xml_extract_tag(const char *xml, const char *tag, char *out,
   return true;
 }
 
-static bool fetch_speaker_info(const char *location_url, char *name,
-                               size_t name_len, bool *invisible) {
-  static char resp_buf[4096]; // larger buffer to capture zone/group info
+static bool fetch_speaker_name(const char *location_url, char *name,
+                               size_t name_len) {
+  static char resp_buf[2048];
   HttpBuf buf = {resp_buf, 0, static_cast<int>(sizeof(resp_buf))};
 
   esp_http_client_config_t cfg = {};
@@ -146,17 +146,159 @@ static bool fetch_speaker_info(const char *location_url, char *name,
   if (err != ESP_OK || status != 200)
     return false;
 
-  // Check if this is an invisible speaker (stereo pair secondary, sub, etc.)
-  // The device XML contains <invisible>1</invisible> for slave speakers
-  *invisible = (strstr(resp_buf, "<invisible>1</invisible>") != nullptr ||
-                strstr(resp_buf, "Invisible=\"1\"") != nullptr);
-
   if (xml_extract_tag(resp_buf, "roomName", name, name_len))
     return true;
   if (xml_extract_tag(resp_buf, "friendlyName", name, name_len))
     return true;
 
   return false;
+}
+
+// ─── Zone Group State (coordinator resolution) ──────────────────────────────
+
+static constexpr const char *ZONE_GROUP_TOPOLOGY_PATH =
+    "/ZoneGroupTopology/Control";
+static constexpr const char *ZONE_GROUP_NS =
+    "urn:schemas-upnp-org:service:ZoneGroupTopology:1";
+static constexpr const char *GET_ZONE_GROUP_STATE_BODY =
+    "<u:GetZoneGroupState xmlns:u=\"urn:schemas-upnp-org:service:ZoneGroupTopology:1\">"
+    "<InstanceID>0</InstanceID>"
+    "</u:GetZoneGroupState>";
+
+// Extract attribute value from an XML tag string
+// e.g. extract_attr(tag, "UUID") from 'UUID="RINCON_xxx"'
+static bool extract_attr(const char *xml, const char *attr_name,
+                         char *out, size_t out_len) {
+  char needle[64];
+  snprintf(needle, sizeof(needle), "%s=\"", attr_name);
+  const char *start = strstr(xml, needle);
+  if (!start) return false;
+  start += strlen(needle);
+  const char *end = strchr(start, '"');
+  if (!end) return false;
+  size_t len = std::min(static_cast<size_t>(end - start), out_len - 1);
+  memcpy(out, start, len);
+  out[len] = '\0';
+  return true;
+}
+
+// Query GetZoneGroupState and build coordinator-only speaker list.
+// Returns true if successful (out->count updated with coordinators).
+static bool resolve_coordinators(const char *any_speaker_ip, int port,
+                                 DiscoveryResult *out) {
+  // Build SOAP envelope
+  char envelope[512];
+  snprintf(envelope, sizeof(envelope),
+    "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
+    "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\""
+    " s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">"
+    "<s:Body>%s</s:Body>"
+    "</s:Envelope>", GET_ZONE_GROUP_STATE_BODY);
+
+  char url[80];
+  snprintf(url, sizeof(url), "http://%s:%d%s", any_speaker_ip, port,
+           ZONE_GROUP_TOPOLOGY_PATH);
+
+  // Response buffer — ZoneGroupState can be large
+  static char resp_buf[8192];
+  HttpBuf buf = {resp_buf, 0, static_cast<int>(sizeof(resp_buf))};
+
+  esp_http_client_config_t cfg = {};
+  cfg.url = url;
+  cfg.method = HTTP_METHOD_POST;
+  cfg.timeout_ms = 3000;
+  cfg.event_handler = on_http_data;
+  cfg.user_data = &buf;
+
+  auto *client = esp_http_client_init(&cfg);
+  if (!client) return false;
+
+  esp_http_client_set_header(client, "Content-Type",
+                             "text/xml; charset=\"utf-8\"");
+  char soap_action[128];
+  snprintf(soap_action, sizeof(soap_action), "\"%s#GetZoneGroupState\"",
+           ZONE_GROUP_NS);
+  esp_http_client_set_header(client, "SOAPAction", soap_action);
+  esp_http_client_set_post_field(client, envelope,
+                                 static_cast<int>(strlen(envelope)));
+
+  esp_err_t err = esp_http_client_perform(client);
+  int status = esp_http_client_get_status_code(client);
+  esp_http_client_cleanup(client);
+
+  if (err != ESP_OK || status != 200) {
+    ESP_LOGW(TAG, "GetZoneGroupState failed: err=%s status=%d",
+             esp_err_to_name(err), status);
+    return false;
+  }
+
+  ESP_LOGD(TAG, "ZoneGroupState: %.500s", resp_buf);
+
+  // Parse ZoneGroup entries — each has a Coordinator="RINCON_xxx" attribute
+  // Find each ZoneGroup and extract the coordinator's Location and ZoneName
+  memset(out, 0, sizeof(*out));
+
+  const char *zg = resp_buf;
+  while ((zg = strstr(zg, "ZoneGroup ")) != nullptr &&
+         out->count < DISCOVERY_MAX_SPEAKERS) {
+    // Extract Coordinator UUID from ZoneGroup tag
+    char coord_uuid[64] = {};
+    if (!extract_attr(zg, "Coordinator", coord_uuid, sizeof(coord_uuid))) {
+      zg++;
+      continue;
+    }
+
+    // Find the ZoneGroupMember with this UUID (the coordinator)
+    // Search within this ZoneGroup (up to next </ZoneGroup>)
+    const char *zg_end = strstr(zg, "</ZoneGroup>");
+    if (!zg_end) zg_end = resp_buf + buf.len;
+
+    // Look for the member matching the coordinator UUID
+    const char *member = zg;
+    bool found = false;
+    while (member < zg_end &&
+           (member = strstr(member, "ZoneGroupMember ")) != nullptr &&
+           member < zg_end) {
+      char uuid[64] = {};
+      if (extract_attr(member, "UUID", uuid, sizeof(uuid)) &&
+          strcmp(uuid, coord_uuid) == 0) {
+        // This is the coordinator member — extract Location and ZoneName
+        char location[256] = {};
+        char zone_name[64] = {};
+
+        extract_attr(member, "Location", location, sizeof(location));
+        extract_attr(member, "ZoneName", zone_name, sizeof(zone_name));
+
+        // Extract IP from Location URL
+        char ip[40] = {};
+        uint16_t member_port = 1400;
+        if (location[0] && extract_ip_from_url(location, ip, sizeof(ip), &member_port)) {
+          auto &speaker = out->speakers[out->count];
+          strncpy(speaker.ip, ip, sizeof(speaker.ip) - 1);
+          speaker.port = member_port;
+          if (zone_name[0]) {
+            strncpy(speaker.name, zone_name, sizeof(speaker.name) - 1);
+          } else {
+            snprintf(speaker.name, sizeof(speaker.name), "Sonos (%s)", ip);
+          }
+          ESP_LOGI(TAG, "Coordinator: %s at %s:%d (UUID: %s)",
+                   speaker.name, speaker.ip, speaker.port, coord_uuid);
+          out->count++;
+          found = true;
+        }
+        break;
+      }
+      member++;
+    }
+
+    if (!found) {
+      ESP_LOGW(TAG, "Could not resolve coordinator UUID: %s", coord_uuid);
+    }
+
+    zg = zg_end;
+  }
+
+  return out->count > 0;
 }
 
 // ─── SSDP Multicast ─────────────────────────────────────────────────────────────────────
@@ -204,15 +346,19 @@ int discovery_scan(DiscoveryResult *out, int timeout_ms) {
 
   ESP_LOGI(TAG, "Scanning for Sonos speakers...");
 
+  // Phase 1: SSDP — find at least one speaker on the network
   char recv_buf[1024];
   struct sockaddr_in src_addr;
   socklen_t addr_len = sizeof(src_addr);
 
+  // Temporary list of raw SSDP responses (before coordinator resolution)
+  char first_ip[40] = {};
+  uint16_t first_port = 1400;
+
   int64_t start = esp_timer_get_time();
   int64_t deadline = start + static_cast<int64_t>(timeout_ms) * 1000;
 
-  while (esp_timer_get_time() < deadline &&
-         out->count < DISCOVERY_MAX_SPEAKERS) {
+  while (esp_timer_get_time() < deadline) {
     int len =
         recvfrom(sock, recv_buf, sizeof(recv_buf) - 1, 0,
                  reinterpret_cast<struct sockaddr *>(&src_addr), &addr_len);
@@ -230,32 +376,41 @@ int discovery_scan(DiscoveryResult *out, int timeout_ms) {
     if (!extract_ip_from_url(location, ip, sizeof(ip), &port))
       continue;
 
-    if (already_found(out, ip))
-      continue;
-
-    char name[64] = {};
-    bool invisible = false;
-
-    if (fetch_speaker_info(location, name, sizeof(name), &invisible)) {
-      if (invisible) {
-        ESP_LOGI(TAG, "Skipping invisible speaker: %s at %s:%d (stereo pair secondary)",
-                 name, ip, port);
-        continue;
-      }
-    } else {
-      snprintf(name, sizeof(name), "Sonos (%s)", ip);
+    if (first_ip[0] == '\0') {
+      strncpy(first_ip, ip, sizeof(first_ip) - 1);
+      first_port = port;
+      ESP_LOGI(TAG, "SSDP: found speaker at %s:%d — querying zone groups", ip, port);
+      break; // One speaker is enough to query zone state
     }
-
-    auto &speaker = out->speakers[out->count];
-    strncpy(speaker.ip, ip, sizeof(speaker.ip) - 1);
-    speaker.port = port;
-    strncpy(speaker.name, name, sizeof(speaker.name) - 1);
-
-    ESP_LOGI(TAG, "Found: %s at %s:%d", speaker.name, speaker.ip, speaker.port);
-    out->count++;
   }
 
   close(sock);
-  ESP_LOGI(TAG, "Scan complete — %d speaker(s) found", out->count);
+
+  if (first_ip[0] == '\0') {
+    ESP_LOGW(TAG, "No speakers found via SSDP");
+    return 0;
+  }
+
+  // Phase 2: Query GetZoneGroupState to find all coordinators
+  if (resolve_coordinators(first_ip, first_port, out)) {
+    ESP_LOGI(TAG, "Zone group resolution: %d coordinator(s) found", out->count);
+    return out->count;
+  }
+
+  // Fallback: if zone group query fails, use SSDP result with device name
+  ESP_LOGW(TAG, "Zone group query failed — falling back to SSDP result");
+  auto &speaker = out->speakers[0];
+  strncpy(speaker.ip, first_ip, sizeof(speaker.ip) - 1);
+  speaker.port = first_port;
+
+  char fallback_url[256];
+  snprintf(fallback_url, sizeof(fallback_url), "http://%s:%d/xml/device_description.xml",
+           first_ip, first_port);
+  if (!fetch_speaker_name(fallback_url, speaker.name, sizeof(speaker.name))) {
+    snprintf(speaker.name, sizeof(speaker.name), "Sonos (%s)", first_ip);
+  }
+
+  out->count = 1;
+  ESP_LOGI(TAG, "Fallback: %s at %s:%d", speaker.name, speaker.ip, speaker.port);
   return out->count;
 }
