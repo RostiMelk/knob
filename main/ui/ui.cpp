@@ -35,9 +35,9 @@ enum class Mode { Volume, Browse, Voice };
 
 static constexpr int BROWSE_TIMEOUT_MS = 7000;
 static constexpr int VOL_DISPLAY_MS = 1500;
-static constexpr int ANIM_FADE_MS = 280;
-static constexpr int ANIM_QUICK_MS = 120;
-static constexpr int ANIM_ARC_FADE_MS = 600;
+static constexpr int ANIM_FADE_MS = 0;      // DIAGNOSTIC: was 280
+static constexpr int ANIM_QUICK_MS = 0;     // DIAGNOSTIC: was 120
+static constexpr int ANIM_ARC_FADE_MS = 0;  // DIAGNOSTIC: was 600
 
 // ─── Palette ────────────────────────────────────────────────────────────────────────────
 
