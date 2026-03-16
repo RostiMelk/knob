@@ -198,9 +198,8 @@ bool settings_load_config_from_sd() {
 
   FILE *f = fopen(SD_CONFIG_PATH, "r");
   if (!f) {
-    ESP_LOGI(TAG, "No .env on SD card");
-    unmount_sd();
-    return false;
+    ESP_LOGI(TAG, "No .env on SD card (SD stays mounted for logos)");
+    return true; // SD stays mounted for logo images
   }
 
   ESP_LOGI(TAG, "Reading .env from SD card");
@@ -211,8 +210,9 @@ bool settings_load_config_from_sd() {
     count++;
   }
   fclose(f);
-  unmount_sd();
 
   ESP_LOGI(TAG, "Applied %d lines from .env", count);
+  // NOTE: SD card intentionally left mounted — LVGL loads station logos
+  // from /sdcard/logos/ at runtime via the "A:" filesystem driver.
   return true;
 }
