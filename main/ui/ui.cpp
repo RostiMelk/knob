@@ -140,6 +140,17 @@ static void set_logo(int index) {
 
   const char *logo_file = STATIONS[index].logo;
   snprintf(s_logo_path, sizeof(s_logo_path), "%s%s", LOGO_DIR, logo_file);
+
+  // Debug: check if file exists before passing to LVGL
+  const char *posix_path = s_logo_path + 2; // skip "A:" prefix
+  FILE *f = fopen(posix_path, "r");
+  if (f) {
+    fclose(f);
+    ESP_LOGI(TAG, "logo: %s (found)", s_logo_path);
+  } else {
+    ESP_LOGW(TAG, "logo: %s (NOT FOUND, posix=%s)", s_logo_path, posix_path);
+  }
+
   lv_image_set_src(s_img_logo, s_logo_path);
 
   const char *dot = strrchr(logo_file, '.');
