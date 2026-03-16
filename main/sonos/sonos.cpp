@@ -149,7 +149,8 @@ static bool soap_request(const char *path, const char *action_name,
     return false;
   }
   if (status != 200) {
-    ESP_LOGW(TAG, "%s HTTP %d", action_name, status);
+    ESP_LOGW(TAG, "%s HTTP %d — response: %.300s", action_name, status,
+             (resp && resp->len > 0) ? resp->data : "(no body)");
     return false;
   }
   return true;
@@ -186,13 +187,30 @@ static bool xml_extract(const char *xml, const char *tag, char *out,
 // ─── Commands ───────────────────────────────────────────────────────────────
 
 static void exec_play_uri(const char *uri) {
-  char inner[512];
-  snprintf(inner, sizeof(inner), SET_URI_FMT, uri);
+  // Sonos requires x-rincon-mp3radio:// for internet radio streams
+  char fixed_uri[256];
+  if (strncmp(uri, "https://", 8) == 0) {
+    snprintf(fixed_uri, sizeof(fixed_uri), "x-rincon-mp3radio://%s", uri + 8);
+  } else if (strncmp(uri, "http://", 7) == 0) {
+    snprintf(fixed_uri, sizeof(fixed_uri), "x-rincon-mp3radio://%s", uri + 7);
+  } else {
+    strncpy(fixed_uri, uri, sizeof(fixed_uri) - 1);
+    fixed_uri[sizeof(fixed_uri) - 1] = '\0';
+  }
 
-  if (soap_fire(AV_TRANSPORT_PATH, "SetAVTransportURI", AV_TRANSPORT_NS,
-                inner)) {
+  char inner[512];
+  snprintf(inner, sizeof(inner), SET_URI_FMT, fixed_uri);
+
+  // Use soap_request (not soap_fire) so we can log error responses
+  static char resp_buf[512];
+  Response resp = {resp_buf, 0, static_cast<int>(sizeof(resp_buf))};
+
+  resp.len = 0;
+  if (soap_request(AV_TRANSPORT_PATH, "SetAVTransportURI", AV_TRANSPORT_NS,
+                   inner, &resp)) {
+    resp.len = 0;
     soap_fire(AV_TRANSPORT_PATH, "Play", AV_TRANSPORT_NS, PLAY_BODY);
-    ESP_LOGI(TAG, "Playing: %s", uri);
+    ESP_LOGI(TAG, "Playing: %s → %s", uri, fixed_uri);
   }
 }
 
