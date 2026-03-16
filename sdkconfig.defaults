@@ -10,6 +10,9 @@ CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 
+# CPU — max frequency for ESP32-S3 (default is 160MHz)
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
 # PSRAM (Octal, 8MB)
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_OCT=y
@@ -62,7 +65,11 @@ CONFIG_LV_USE_CLIB_MALLOC=y
 # CONFIG_LV_USE_BUILTIN_STRING is not set
 CONFIG_LV_USE_CLIB_STRING=y
 
-# LVGL image cache — keep decoded images in memory to avoid re-decoding
-# PNGs when scrolling back to a previous station (0 = disabled)
-CONFIG_LV_CACHE_DEF_SIZE=12
-CONFIG_LV_IMAGE_HEADER_CACHE_DEF_CNT=12
+# LVGL image cache — decoded images stay in PSRAM to avoid re-decoding
+# LV_CACHE_DEF_SIZE is in bytes: 22 images × ~150KB avg = ~3.2MB (fits in 8MB PSRAM)
+# LV_IMAGE_HEADER_CACHE_DEF_CNT is count of cached headers
+CONFIG_LV_CACHE_DEF_SIZE=3200000
+CONFIG_LV_IMAGE_HEADER_CACHE_DEF_CNT=24
+
+# LVGL performance — hot render paths in IRAM for faster execution
+CONFIG_LV_ATTRIBUTE_FAST_MEM_USE_IRAM=y
