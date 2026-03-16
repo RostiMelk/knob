@@ -77,6 +77,14 @@ if [ -n "$LOG_FILE" ]; then
   MONITOR=true
 fi
 
+# ─── Cross-platform sed -i helper ────────────────────────────────────────────
+# macOS sed requires -i '', GNU sed requires -i (no argument).
+if [[ "$(uname)" == "Darwin" ]]; then
+  sedi() { sed -i '' "$@"; }
+else
+  sedi() { sed -i "$@"; }
+fi
+
 # ─── 1. Prerequisites ────────────────────────────────────────────────────────
 step "🔍 Checking prerequisites..."
 
@@ -133,7 +141,94 @@ if [ -z "$IDF_PATH" ]; then
   }
 fi
 
-# ─── 3. Detect ESP32-S3 port ─────────────────────────────────────────────────
+# ─── 3. Inject .env into sdkconfig ──────────────────────────────────────────
+step "📝 Loading configuration from .env..."
+
+# Resolve project root (directory containing this script)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV_FILE="$SCRIPT_DIR/.env"
+
+if [ -f "$ENV_FILE" ]; then
+  # Parse .env file: supports KEY=VALUE, KEY="VALUE", comments (#), empty lines
+  parse_env_value() {
+    local raw="$1"
+    # Strip surrounding double quotes
+    raw="${raw#\"}"
+    raw="${raw%\"}"
+    # Strip surrounding single quotes
+    raw="${raw#\'}"
+    raw="${raw%\'}"
+    printf '%s' "$raw"
+  }
+
+  WIFI_SSID=""
+  WIFI_PASS=""
+  SPEAKER_IP=""
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    # Skip empty lines and comments
+    [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+    # Match KEY=VALUE (with optional whitespace around =)
+    if [[ "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+      key="${BASH_REMATCH[1]}"
+      val="$(parse_env_value "${BASH_REMATCH[2]}")"
+      case "$key" in
+        WIFI_SSID)  WIFI_SSID="$val" ;;
+        WIFI_PASS)  WIFI_PASS="$val" ;;
+        SPEAKER_IP) SPEAKER_IP="$val" ;;
+      esac
+    fi
+  done < "$ENV_FILE"
+
+  # Helper: set a Kconfig value in sdkconfig (update if exists, append if not)
+  set_sdkconfig() {
+    local config_key="$1"
+    local config_val="$2"
+    local sdkconfig="$SCRIPT_DIR/sdkconfig"
+    if grep -q "^${config_key}=" "$sdkconfig" 2>/dev/null; then
+      sedi "s|^${config_key}=.*|${config_key}=\"${config_val}\"|" "$sdkconfig"
+    else
+      echo "${config_key}=\"${config_val}\"" >> "$sdkconfig"
+    fi
+  }
+
+  INJECTED=false
+
+  if [ -n "$WIFI_SSID" ]; then
+    set_sdkconfig "CONFIG_RADIO_WIFI_SSID" "$WIFI_SSID"
+    INJECTED=true
+  fi
+
+  if [ -n "$WIFI_PASS" ]; then
+    set_sdkconfig "CONFIG_RADIO_WIFI_PASSWORD" "$WIFI_PASS"
+    INJECTED=true
+  fi
+
+  if [ -n "$SPEAKER_IP" ]; then
+    set_sdkconfig "CONFIG_RADIO_SPEAKER_IP" "$SPEAKER_IP"
+    INJECTED=true
+  fi
+
+  if [ "$INJECTED" = true ]; then
+    # Print summary (mask password)
+    if [ -n "$WIFI_SSID" ]; then
+      if [ -n "$WIFI_PASS" ]; then
+        ok "WiFi: $WIFI_SSID (password: ****)"
+      else
+        ok "WiFi: $WIFI_SSID (no password set)"
+      fi
+    fi
+    if [ -n "$SPEAKER_IP" ]; then
+      ok "Speaker IP: $SPEAKER_IP"
+    fi
+  else
+    warn "No WIFI_SSID, WIFI_PASS, or SPEAKER_IP found in .env"
+  fi
+else
+  warn "No .env file found — WiFi credentials not configured. Copy .env.template to .env and fill in your values."
+fi
+
+# ─── 4. Detect ESP32-S3 port ─────────────────────────────────────────────────
 if [ "$MODE" != "build-only" ]; then
   step "🔌 Detecting ESP32-S3 port..."
 
@@ -184,7 +279,7 @@ if [ "$MODE" != "build-only" ]; then
   fi
 fi
 
-# ─── 4. Build ────────────────────────────────────────────────────────────────
+# ─── 5. Build ────────────────────────────────────────────────────────────────
 step "🔨 Building firmware..."
 
 if [ ! -d "build" ]; then
@@ -213,7 +308,7 @@ if [ "$MODE" = "build-only" ]; then
   exit 0
 fi
 
-# ─── 5. Flash ────────────────────────────────────────────────────────────────
+# ─── 6. Flash ────────────────────────────────────────────────────────────────
 step "⚡ Flashing..."
 info "Port: $DETECTED_PORT"
 
@@ -239,7 +334,7 @@ fi
 
 ok "Flash complete!"
 
-# ─── 6. Monitor (optional) ───────────────────────────────────────────────────
+# ─── 7. Monitor (optional) ───────────────────────────────────────────────────
 if [ "$MONITOR" = true ]; then
   if [ -n "$LOG_FILE" ]; then
     step "📺 Starting monitor... (output also saved to $LOG_FILE) (Ctrl+T then Ctrl+X to exit)"
