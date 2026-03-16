@@ -330,7 +330,7 @@ static void enter_browse() {
   anim_fade(s_lbl_subtitle, anim_opa_cb, LV_OPA_TRANSP, LV_OPA_COVER,
             ANIM_QUICK_MS);
 
-  char pos[16];
+  char pos[24];
   snprintf(pos, sizeof(pos), "%d / %d", s_browse_index + 1, STATION_COUNT);
   lv_label_set_text(s_lbl_position, pos);
   lv_obj_remove_flag(s_lbl_position, LV_OBJ_FLAG_HIDDEN);
@@ -721,7 +721,7 @@ static void rebuild_speaker_list() {
     lv_obj_set_style_radius(btn, 12, LV_PART_MAIN);
     lv_obj_remove_flag(btn, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_style_bg_color(btn, COL_ACCENT, LV_PART_MAIN | LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(btn, COL_ACCENT, static_cast<lv_style_selector_t>(LV_PART_MAIN | LV_STATE_PRESSED));
 
     lv_obj_t *lbl = lv_label_create(btn);
     lv_obj_set_style_text_color(lbl, COL_TEXT, LV_PART_MAIN);
@@ -956,7 +956,7 @@ void ui_on_encoder_rotate(int32_t steps) {
     anim_fade(s_logo_container, anim_opa_cb, LV_OPA_TRANSP, LV_OPA_70,
               ANIM_QUICK_MS);
 
-    char pos[16];
+    char pos[24];
     snprintf(pos, sizeof(pos), "%d / %d", s_browse_index + 1, STATION_COUNT);
     lv_label_set_text(s_lbl_position, pos);
 

@@ -7,11 +7,11 @@ idf_component_register(
         "ui_voice.cpp"
         "display_idf.cpp"
         "ui_bridge.cpp"
-        "geist_regular_14.c"
-        "geist_regular_16.c"
-        "geist_regular_20.c"
-        "geist_medium_24.c"
-        "geist_mono_medium_48.c"
+        "../../main/fonts/geist_regular_14.c"
+        "../../main/fonts/geist_regular_16.c"
+        "../../main/fonts/geist_regular_20.c"
+        "../../main/fonts/geist_medium_24.c"
+        "../../main/fonts/geist_mono_medium_48.c"
     INCLUDE_DIRS "include"
     REQUIRES
         driver
