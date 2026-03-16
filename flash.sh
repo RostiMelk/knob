@@ -141,12 +141,73 @@ if [ -z "$IDF_PATH" ]; then
   }
 fi
 
-# ─── 3. Inject .env into sdkconfig ──────────────────────────────────────────
-step "📝 Loading configuration from .env..."
+# ─── 3. Detect ESP32-S3 port ─────────────────────────────────────────────────
+if [ "$MODE" != "build-only" ]; then
+  step "🔌 Detecting ESP32-S3 port..."
+
+  # Collect candidate ports
+  PORTS=()
+  if [[ "$(uname)" == "Darwin" ]]; then
+    while IFS= read -r p; do PORTS+=("$p"); done < <(ls /dev/cu.usb* 2>/dev/null || true)
+  else
+    while IFS= read -r p; do PORTS+=("$p"); done < <(ls /dev/ttyUSB* /dev/ttyACM* 2>/dev/null || true)
+  fi
+
+  if [ ${#PORTS[@]} -eq 0 ]; then
+    err "No USB serial ports found."
+    err "Connect the board via USB-C and try again."
+    exit 1
+  fi
+
+  DETECTED_PORT=""
+  WRONG_CHIP_PORT=""
+
+  for port in "${PORTS[@]}"; do
+    info "Probing $port ..."
+    CHIP_OUTPUT=$(esptool.py --port "$port" --no-stub chip_id 2>&1 || true)
+
+    if echo "$CHIP_OUTPUT" | grep -qi "ESP32-S3"; then
+      ok "Found ESP32-S3 on $port"
+      DETECTED_PORT="$port"
+      break
+    elif echo "$CHIP_OUTPUT" | grep -qi "ESP32"; then
+      warn "Found ESP32 (co-processor) on $port — wrong chip!"
+      WRONG_CHIP_PORT="$port"
+    else
+      warn "Could not identify chip on $port (may be in use or unresponsive)"
+    fi
+  done
+
+  if [ -z "$DETECTED_PORT" ]; then
+    if [ -n "$WRONG_CHIP_PORT" ]; then
+      echo ""
+      echo -e "${YELLOW}${BOLD}⚠️  USB-C cable orientation issue detected!${NC}"
+      echo -e "${YELLOW}  The board's CH445P switch is routing to the ESP32 co-processor.${NC}"
+      echo -e "${YELLOW}  👉 Flip the USB-C cable and run this script again.${NC}"
+    else
+      err "Could not find an ESP32-S3 on any port."
+      err "Make sure the board is connected and drivers are installed."
+    fi
+    exit 1
+  fi
+fi
+
+# ─── 4. Build ────────────────────────────────────────────────────────────────
+step "🔨 Building firmware..."
 
 # Resolve project root (directory containing this script)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="$SCRIPT_DIR/.env"
+
+if [ ! -d "build" ]; then
+  info "No build directory found — setting target to esp32s3..."
+  idf.py set-target esp32s3
+  # set-target regenerates sdkconfig from sdkconfig.defaults, so .env must be
+  # injected AFTER this point (not before) to avoid credentials being wiped.
+fi
+
+# ─── Inject .env into sdkconfig ──────────────────────────────────────────────
+step "📝 Loading configuration from .env..."
 
 if [ -f "$ENV_FILE" ]; then
   # Parse .env file: supports KEY=VALUE, KEY="VALUE", comments (#), empty lines
@@ -228,65 +289,7 @@ else
   warn "No .env file found — WiFi credentials not configured. Copy .env.template to .env and fill in your values."
 fi
 
-# ─── 4. Detect ESP32-S3 port ─────────────────────────────────────────────────
-if [ "$MODE" != "build-only" ]; then
-  step "🔌 Detecting ESP32-S3 port..."
-
-  # Collect candidate ports
-  PORTS=()
-  if [[ "$(uname)" == "Darwin" ]]; then
-    while IFS= read -r p; do PORTS+=("$p"); done < <(ls /dev/cu.usb* 2>/dev/null || true)
-  else
-    while IFS= read -r p; do PORTS+=("$p"); done < <(ls /dev/ttyUSB* /dev/ttyACM* 2>/dev/null || true)
-  fi
-
-  if [ ${#PORTS[@]} -eq 0 ]; then
-    err "No USB serial ports found."
-    err "Connect the board via USB-C and try again."
-    exit 1
-  fi
-
-  DETECTED_PORT=""
-  WRONG_CHIP_PORT=""
-
-  for port in "${PORTS[@]}"; do
-    info "Probing $port ..."
-    CHIP_OUTPUT=$(esptool.py --port "$port" --no-stub chip_id 2>&1 || true)
-
-    if echo "$CHIP_OUTPUT" | grep -qi "ESP32-S3"; then
-      ok "Found ESP32-S3 on $port"
-      DETECTED_PORT="$port"
-      break
-    elif echo "$CHIP_OUTPUT" | grep -qi "ESP32"; then
-      warn "Found ESP32 (co-processor) on $port — wrong chip!"
-      WRONG_CHIP_PORT="$port"
-    else
-      warn "Could not identify chip on $port (may be in use or unresponsive)"
-    fi
-  done
-
-  if [ -z "$DETECTED_PORT" ]; then
-    if [ -n "$WRONG_CHIP_PORT" ]; then
-      echo ""
-      echo -e "${YELLOW}${BOLD}⚠️  USB-C cable orientation issue detected!${NC}"
-      echo -e "${YELLOW}  The board's CH445P switch is routing to the ESP32 co-processor.${NC}"
-      echo -e "${YELLOW}  👉 Flip the USB-C cable and run this script again.${NC}"
-    else
-      err "Could not find an ESP32-S3 on any port."
-      err "Make sure the board is connected and drivers are installed."
-    fi
-    exit 1
-  fi
-fi
-
-# ─── 5. Build ────────────────────────────────────────────────────────────────
-step "🔨 Building firmware..."
-
-if [ ! -d "build" ]; then
-  info "No build directory found — setting target to esp32s3..."
-  idf.py set-target esp32s3
-fi
-
+# ─── Build ────────────────────────────────────────────────────────────────────
 info "Target: esp32s3"
 if idf.py build; then
   # Try to extract binary size from build output
@@ -308,7 +311,7 @@ if [ "$MODE" = "build-only" ]; then
   exit 0
 fi
 
-# ─── 6. Flash ────────────────────────────────────────────────────────────────
+# ─── 5. Flash ────────────────────────────────────────────────────────────────
 step "⚡ Flashing..."
 info "Port: $DETECTED_PORT"
 
@@ -334,7 +337,7 @@ fi
 
 ok "Flash complete!"
 
-# ─── 7. Monitor (optional) ───────────────────────────────────────────────────
+# ─── 6. Monitor (optional) ───────────────────────────────────────────────────
 if [ "$MONITOR" = true ]; then
   if [ -n "$LOG_FILE" ]; then
     step "📺 Starting monitor... (output also saved to $LOG_FILE) (Ctrl+T then Ctrl+X to exit)"
