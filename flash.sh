@@ -268,7 +268,7 @@ if [ -f "$ENV_FILE" ]; then
   fi
 
   if [ -n "$SPEAKER_IP" ]; then
-    set_sdkconfig "CONFIG_RADIO_SPEAKER_IP" "$SPEAKER_IP"
+    set_sdkconfig "CONFIG_RADIO_SONOS_SPEAKER_IP" "$SPEAKER_IP"
     INJECTED=true
   fi
 
