@@ -32,6 +32,7 @@ static void on_poll(void *) {
 
   s_last_count += steps * 4; // consume only full detents
 
+  ESP_LOGI(TAG, "Encoder: count=%d delta=%d steps=%" PRId32, count, delta, steps);
   esp_event_post(APP_EVENT, APP_EVENT_ENCODER_ROTATE, &steps, sizeof(steps), 0);
 }
 

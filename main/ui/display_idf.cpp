@@ -298,7 +298,7 @@ static void init_lcd() {
 
   esp_lcd_panel_dev_config_t panel_cfg = {};
   panel_cfg.reset_gpio_num = -1; // Already reset above via direct GPIO
-  panel_cfg.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_BGR;
+  panel_cfg.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB;
   panel_cfg.bits_per_pixel = 16;
   panel_cfg.vendor_config = &vendor_cfg;
   ESP_ERROR_CHECK(
@@ -375,6 +375,7 @@ void display_init(lv_display_t **disp, lv_indev_t **touch) {
               .buff_dma = true,
               .buff_spiram = false,
               .sw_rotate = false,
+              .swap_bytes = true,
               .full_refresh = false,
               .direct_mode = false,
           },
@@ -387,7 +388,7 @@ void display_init(lv_display_t **disp, lv_indev_t **touch) {
   };
   *touch = lvgl_port_add_touch(&touch_port_cfg);
 
-  ESP_LOGI(TAG, "LVGL port initialized");
+  ESP_LOGI(TAG, "LVGL port initialized (swap_bytes=true)");
 }
 
 bool display_lock(int timeout_ms) { return lvgl_port_lock(timeout_ms); }
