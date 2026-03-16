@@ -199,11 +199,11 @@ step "🔨 Building firmware..."
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="$SCRIPT_DIR/.env"
 
-if [ ! -d "build" ]; then
-  info "No build directory found — setting target to esp32s3..."
+if [ ! -f "sdkconfig" ]; then
+  info "No sdkconfig found — setting target to esp32s3..."
   idf.py set-target esp32s3
-  # set-target regenerates sdkconfig from sdkconfig.defaults, so .env must be
-  # injected AFTER this point (not before) to avoid credentials being wiped.
+  # set-target regenerates sdkconfig from sdkconfig.defaults + sdkconfig.defaults.esp32s3.
+  # .env injection runs AFTER this to avoid credentials being wiped.
 fi
 
 # ─── Inject .env into sdkconfig ──────────────────────────────────────────────
