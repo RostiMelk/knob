@@ -20,6 +20,7 @@
 #include "freertos/task.h"
 
 #include <algorithm>
+#include <cstring>
 #include <ctime>
 
 static constexpr const char *TAG = "main";
