@@ -1,0 +1,38 @@
+[package]
+name = "radio"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+esp-idf-svc = { version = "0.51", features = ["binstart"] }
+esp-idf-hal = "0.45"
+esp-idf-sys = "0.36"
+log = "0.4"
+anyhow = "1"
+thiserror = "2"
+
+[build-dependencies]
+embuild = "0.33"
+
+[[package.metadata.esp-idf-sys.extra_components]]
+remote_component = { name = "lvgl/lvgl", version = "~9" }
+
+[[package.metadata.esp-idf-sys.extra_components]]
+remote_component = { name = "espressif/esp_lvgl_port", version = "^2" }
+
+[[package.metadata.esp-idf-sys.extra_components]]
+remote_component = { name = "espressif/esp_lcd_touch_cst816s", version = "*" }
+
+[[package.metadata.esp-idf-sys.extra_components]]
+remote_component = { name = "espressif/esp_lcd_st77916", version = "^2" }
+
+[[package.metadata.esp-idf-sys.extra_components]]
+component_dirs = ["components"]
+
+[profile.release]
+opt-level = "s"
+panic = "abort"
+
+[profile.dev]
+panic = "abort"
+opt-level = 1
