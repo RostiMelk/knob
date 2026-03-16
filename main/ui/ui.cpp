@@ -194,6 +194,17 @@ static void anim_hide_done(lv_anim_t *a) {
 static void anim_fade(lv_obj_t *obj, lv_anim_exec_xcb_t exec_cb, int32_t start,
                       int32_t end, int duration,
                       void (*done_cb)(lv_anim_t *) = nullptr) {
+  // Skip animation — apply final value immediately
+  if (duration <= 0) {
+    exec_cb(obj, end);
+    if (done_cb) {
+      lv_anim_t dummy = {};
+      lv_anim_set_var(&dummy, obj);
+      done_cb(&dummy);
+    }
+    return;
+  }
+
   lv_anim_t a;
   lv_anim_init(&a);
   lv_anim_set_var(&a, obj);
