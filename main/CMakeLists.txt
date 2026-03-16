@@ -43,6 +43,7 @@ idf_component_register(
         esp_psram
         fatfs
         sdmmc
+        spiffs
 )
 
 target_compile_options(${COMPONENT_LIB} PUBLIC
