@@ -41,7 +41,6 @@ idf_component_register(
     PRIV_REQUIRES
         esp_netif
         esp_psram
-        esp_spiffs
         fatfs
         sdmmc
 )
