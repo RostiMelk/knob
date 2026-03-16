@@ -3,6 +3,7 @@
 
 #include "esp_http_client.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 
 #include "lwip/igmp.h"
 #include "lwip/netdb.h"
@@ -25,7 +26,7 @@ static constexpr const char *MSEARCH =
     "ST: urn:schemas-upnp-org:device:ZonePlayer:1\r\n"
     "\r\n";
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
+// ─── Helpers ────────────────────────────────────────────────────────────────────────────────
 
 static bool parse_location(const char *response, char *out, size_t out_len) {
   const char *loc = strcasestr(response, "LOCATION:");
@@ -81,7 +82,7 @@ static bool already_found(const DiscoveryResult *result, const char *ip) {
   return false;
 }
 
-// ─── Fetch Device Description XML ───────────────────────────────────────────
+// ─── Fetch Device Description XML ─────────────────────────────────────────────────────────────
 
 struct HttpBuf {
   char *data;
@@ -153,7 +154,7 @@ static bool fetch_speaker_name(const char *location_url, char *name,
   return false;
 }
 
-// ─── SSDP Multicast ─────────────────────────────────────────────────────────
+// ─── SSDP Multicast ─────────────────────────────────────────────────────────────────────
 
 static int send_msearch(int sock) {
   struct sockaddr_in dest = {};
@@ -170,7 +171,7 @@ static int send_msearch(int sock) {
   return sent;
 }
 
-// ─── Public API ─────────────────────────────────────────────────────────────
+// ─── Public API ─────────────────────────────────────────────────────────────────────
 
 void discovery_init() { ESP_LOGI(TAG, "SSDP discovery ready"); }
 

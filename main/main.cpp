@@ -63,7 +63,7 @@ static void on_timer_started(void *, esp_event_base_t, int32_t, void *data) {
   auto total = *static_cast<int32_t *>(data);
   char label[64];
   timer_get_label(label, sizeof(label));
-  ESP_LOGI(TAG, "Timer started: %ds '%s'", total, label);
+  ESP_LOGI(TAG, "Timer started: %ds '%s'", (int)total, label);
   ui_timer_show(total, label);
 }
 

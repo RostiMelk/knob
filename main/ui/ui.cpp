@@ -19,7 +19,7 @@
 
 static constexpr const char *TAG = "ui";
 
-// ─── Interaction Model ──────────────────────────────────────────────────────
+// ─── Interaction Model ────────────────────────────────────────────────────────────────────
 //
 //  VOLUME mode (default):
 //    encoder turn  → volume arc brightens + number appears
@@ -39,7 +39,7 @@ static constexpr int ANIM_FADE_MS = 280;
 static constexpr int ANIM_QUICK_MS = 120;
 static constexpr int ANIM_ARC_FADE_MS = 600;
 
-// ─── Palette ────────────────────────────────────────────────────────────────
+// ─── Palette ────────────────────────────────────────────────────────────────────────────
 
 #define COL_BG lv_color_hex(0x000000)
 #define COL_TEXT lv_color_hex(0xFFFFFF)
@@ -53,7 +53,7 @@ static constexpr int ANIM_ARC_FADE_MS = 600;
 #define COL_RED lv_color_hex(0xFF453A)
 #define COL_BROWSE_BG lv_color_hex(0x0A0A0A)
 
-// ─── State ──────────────────────────────────────────────────────────────────
+// ─── State ──────────────────────────────────────────────────────────────────────────────
 
 static Mode s_mode = Mode::Volume;
 static int s_volume;
@@ -62,7 +62,7 @@ static int s_browse_index;
 static PlayState s_play_state = PlayState::Stopped;
 static bool s_was_playing;
 
-// ─── Widgets ────────────────────────────────────────────────────────────────
+// ─── Widgets ────────────────────────────────────────────────────────────────────────────
 
 static lv_obj_t *s_screen;
 static lv_obj_t *s_home;
@@ -117,7 +117,7 @@ static DiscoveryResult s_discovered;
 static int s_speaker_highlight;
 static bool s_on_picker;
 
-// ─── Logo Path ──────────────────────────────────────────────────────────────
+// ─── Logo Path ──────────────────────────────────────────────────────────────────────────
 
 #ifdef SIMULATOR
 static constexpr const char *LOGO_DIR = "A:assets/logos/";
@@ -150,7 +150,7 @@ static void set_logo(int index) {
   lv_image_set_src(s_bg_img, s_bg_path);
 }
 
-// ─── Forward Declarations ───────────────────────────────────────────────────
+// ─── Forward Declarations ─────────────────────────────────────────────────────────────
 
 static void enter_browse();
 static void exit_browse();
@@ -165,7 +165,7 @@ static void activate_voice();
 static void deactivate_voice();
 static void on_page_changed(int index, const char *id);
 
-// ─── Animation Helpers ──────────────────────────────────────────────────────
+// ─── Animation Helpers ────────────────────────────────────────────────────────────────
 
 static void anim_opa_cb(void *obj, int32_t v) {
   lv_obj_set_style_opa(static_cast<lv_obj_t *>(obj), v, LV_PART_MAIN);
@@ -198,7 +198,7 @@ static void anim_fade(lv_obj_t *obj, lv_anim_exec_xcb_t exec_cb, int32_t start,
   lv_anim_start(&a);
 }
 
-// ─── Volume Arc ─────────────────────────────────────────────────────────────
+// ─── Volume Arc ─────────────────────────────────────────────────────────────────────
 
 static void on_vol_hide(lv_timer_t *) {
   anim_fade(s_vol_arc, anim_arc_ind_opa_cb, LV_OPA_COVER, LV_OPA_30,
@@ -206,7 +206,7 @@ static void on_vol_hide(lv_timer_t *) {
   lv_timer_pause(s_vol_hide_timer);
 }
 
-// ─── Clock ──────────────────────────────────────────────────────────────────
+// ─── Clock ────────────────────────────────────────────────────────────────────────────
 
 static void update_clock() {
   time_t now = time(nullptr);
@@ -302,7 +302,7 @@ static void show_volume(int level) {
   lv_timer_resume(s_vol_hide_timer);
 }
 
-// ─── Mode Switching ─────────────────────────────────────────────────────────
+// ─── Mode Switching ─────────────────────────────────────────────────────────────────
 
 static void enter_browse() {
   s_mode = Mode::Browse;
@@ -330,7 +330,7 @@ static void enter_browse() {
   anim_fade(s_lbl_subtitle, anim_opa_cb, LV_OPA_TRANSP, LV_OPA_COVER,
             ANIM_QUICK_MS);
 
-  char pos[16];
+  char pos[24];
   snprintf(pos, sizeof(pos), "%d / %d", s_browse_index + 1, STATION_COUNT);
   lv_label_set_text(s_lbl_position, pos);
   lv_obj_remove_flag(s_lbl_position, LV_OBJ_FLAG_HIDDEN);
@@ -395,7 +395,7 @@ static void confirm_browse() {
 
 static void on_browse_timeout(lv_timer_t *) { exit_browse(); }
 
-// ─── Subtitle (play state) ──────────────────────────────────────────────────
+// ─── Subtitle (play state) ────────────────────────────────────────────────────────────
 
 static void update_subtitle() {
   const char *text;
@@ -419,7 +419,7 @@ static void update_subtitle() {
   lv_label_set_text(s_lbl_subtitle, text);
 }
 
-// ─── Touch ──────────────────────────────────────────────────────────────────
+// ─── Touch ────────────────────────────────────────────────────────────────────────────
 
 static void on_tap_delay(lv_timer_t *) {
   lv_timer_pause(s_tap_delay_timer);
@@ -523,9 +523,9 @@ static void on_screen_released(lv_event_t *) {
   }
 }
 
-// ─── Main Screen ────────────────────────────────────────────────────────────
+// ─── Main Screen ────────────────────────────────────────────────────────────────────
 
-// ─── Home Page (page 0 in pager) ────────────────────────────────────────────
+// ─── Home Page (page 0 in pager) ────────────────────────────────────────────────────────
 
 static void home_page_build(lv_obj_t *parent) {
   s_home = parent;
@@ -658,7 +658,7 @@ static void build_main_screen() {
   lv_obj_align(s_wifi_dot, LV_ALIGN_TOP_MID, 0, 36);
 }
 
-// ─── Speaker Picker (first boot only) ───────────────────────────────────────
+// ─── Speaker Picker (first boot only) ───────────────────────────────────────────────
 
 static void on_speaker_tap(lv_event_t *e) {
   auto index =
@@ -721,7 +721,7 @@ static void rebuild_speaker_list() {
     lv_obj_set_style_radius(btn, 12, LV_PART_MAIN);
     lv_obj_remove_flag(btn, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_style_bg_color(btn, COL_ACCENT, LV_PART_MAIN | LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(btn, COL_ACCENT, static_cast<lv_style_selector_t>(LV_PART_MAIN | LV_STATE_PRESSED));
 
     lv_obj_t *lbl = lv_label_create(btn);
     lv_obj_set_style_text_color(lbl, COL_TEXT, LV_PART_MAIN);
@@ -740,7 +740,7 @@ static void rebuild_speaker_list() {
   }
 }
 
-// ─── Scanning Overlay ───────────────────────────────────────────────────────
+// ─── Scanning Overlay ───────────────────────────────────────────────────────────────
 
 static void build_scanning_overlay() {
   s_scanning_overlay = lv_obj_create(s_screen);
@@ -756,11 +756,11 @@ static void build_scanning_overlay() {
 
   s_lbl_scanning = lv_label_create(s_scanning_overlay);
   lv_obj_set_style_text_color(s_lbl_scanning, COL_TEXT_SEC, LV_PART_MAIN);
-  lv_label_set_text(s_lbl_scanning, "Scanning\xE2\x80\xA6");
+  lv_label_set_text(s_lbl_scanning, "Scanning…");
   lv_obj_center(s_lbl_scanning);
 }
 
-// ─── Public API ─────────────────────────────────────────────────────────────
+// ─── Public API ─────────────────────────────────────────────────────────────────────
 
 void ui_init() {
   lv_display_t *disp = nullptr;
@@ -857,7 +857,7 @@ void ui_set_speaker_name(const char *name) {
   }
 }
 
-// ─── Voice Mode ─────────────────────────────────────────────────────────────
+// ─── Voice Mode ─────────────────────────────────────────────────────────────────────
 
 void ui_voice_activate() {
   if (!display_lock(50))
@@ -956,7 +956,7 @@ void ui_on_encoder_rotate(int32_t steps) {
     anim_fade(s_logo_container, anim_opa_cb, LV_OPA_TRANSP, LV_OPA_70,
               ANIM_QUICK_MS);
 
-    char pos[16];
+    char pos[24];
     snprintf(pos, sizeof(pos), "%d / %d", s_browse_index + 1, STATION_COUNT);
     lv_label_set_text(s_lbl_position, pos);
 
