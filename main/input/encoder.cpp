@@ -43,8 +43,9 @@ static void init_pcnt() {
   unit_cfg.flags.accum_count = 1;
   ESP_ERROR_CHECK(pcnt_new_unit(&unit_cfg, &s_pcnt_unit));
 
+  // Glitch filter: 1000ns (1µs) — ESP32-S3 PCNT max is ~12.7µs at 80MHz APB
   pcnt_glitch_filter_config_t filter_cfg = {};
-  filter_cfg.max_glitch_ns = 50'000;
+  filter_cfg.max_glitch_ns = 1000;
   ESP_ERROR_CHECK(pcnt_unit_set_glitch_filter(s_pcnt_unit, &filter_cfg));
 
   // Channel A: edge on B, level on A (swapped from original — fixes
@@ -93,6 +94,6 @@ void encoder_init() {
   ESP_ERROR_CHECK(
       esp_timer_start_periodic(s_poll_timer, POLL_INTERVAL_MS * 1000LL));
 
-  ESP_LOGI(TAG, "Encoder ready (A=%d B=%d swapped, poll=%dms, filter=50us)",
+  ESP_LOGI(TAG, "Encoder ready (A=%d B=%d swapped, poll=%dms, filter=1us)",
            PIN_ENC_A, PIN_ENC_B, POLL_INTERVAL_MS);
 }
