@@ -15,6 +15,8 @@
 #   ./flash.sh --monitor     — build + flash + open serial monitor
 #   ./flash.sh -m            — same as --monitor
 #   ./flash.sh --build-only  — build only, no flash
+#   ./flash.sh --log <file>  — build + flash + monitor, save output to file
+#   ./flash.sh -m --log <file> — same as above
 
 set -e
 
@@ -35,16 +37,30 @@ step() { echo -e "\n${BOLD}$*${NC}"; }
 # ─── Argument parsing ────────────────────────────────────────────────────────
 MODE="flash"  # flash | build-only
 MONITOR=false
+LOG_FILE=""
 
-for arg in "$@"; do
+args=("$@")
+i=0
+while [ $i -lt ${#args[@]} ]; do
+  arg="${args[$i]}"
   case "$arg" in
     --monitor|-m)    MONITOR=true ;;
     --build-only)    MODE="build-only" ;;
+    --log)
+      i=$(( i + 1 ))
+      if [ $i -ge ${#args[@]} ] || [[ "${args[$i]}" == --* ]]; then
+        err "--log requires a filename argument"
+        echo "Run './flash.sh --help' for usage."
+        exit 1
+      fi
+      LOG_FILE="${args[$i]}"
+      ;;
     --help|-h)
-      echo "Usage: ./flash.sh [--monitor|-m] [--build-only]"
-      echo "  (no flags)     Build and flash firmware"
-      echo "  --monitor, -m  Build, flash, then open serial monitor"
-      echo "  --build-only   Build only, do not flash"
+      echo "Usage: ./flash.sh [--monitor|-m] [--build-only] [--log <file>]"
+      echo "  (no flags)       Build and flash firmware"
+      echo "  --monitor, -m    Build, flash, then open serial monitor"
+      echo "  --build-only     Build only, do not flash"
+      echo "  --log <file>     Save serial monitor output to <file> (implies --monitor)"
       exit 0
       ;;
     *)
@@ -53,7 +69,13 @@ for arg in "$@"; do
       exit 1
       ;;
   esac
+  i=$(( i + 1 ))
 done
+
+# --log implies --monitor
+if [ -n "$LOG_FILE" ]; then
+  MONITOR=true
+fi
 
 # ─── 1. Prerequisites ────────────────────────────────────────────────────────
 step "🔍 Checking prerequisites..."
@@ -219,6 +241,11 @@ ok "Flash complete!"
 
 # ─── 6. Monitor (optional) ───────────────────────────────────────────────────
 if [ "$MONITOR" = true ]; then
-  step "📺 Starting monitor... (Ctrl+T then Ctrl+X to exit)"
-  idf.py -p "$DETECTED_PORT" monitor
+  if [ -n "$LOG_FILE" ]; then
+    step "📺 Starting monitor... (output also saved to $LOG_FILE) (Ctrl+T then Ctrl+X to exit)"
+    idf.py -p "$DETECTED_PORT" monitor | tee "$LOG_FILE"
+  else
+    step "📺 Starting monitor... (Ctrl+T then Ctrl+X to exit)"
+    idf.py -p "$DETECTED_PORT" monitor
+  fi
 fi
