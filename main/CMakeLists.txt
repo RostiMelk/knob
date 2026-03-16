@@ -52,6 +52,25 @@ target_compile_options(${COMPONENT_LIB} PUBLIC
     -fno-rtti
 )
 
-# Pack assets/logos/ into the "storage" SPIFFS partition at flash time.
-# Files inside assets/logos/ appear at the SPIFFS root, e.g. /spiffs/nrk_p1.png
-spiffs_create_partition_image(storage ${CMAKE_SOURCE_DIR}/assets/logos FLASH_IN_PROJECT)
+# ── Image conversion: PNG → LVGL .bin at build time ──────────────────────────────
+# Logos: ARGB8888 (preserves alpha). Backgrounds: RGB565 + dithering (fixes banding).
+# Output goes to build/spiffs_data/ which gets packed into the SPIFFS partition.
+
+set(SPIFFS_DIR "${CMAKE_BINARY_DIR}/spiffs_data")
+set(LVGL_IMAGE "${CMAKE_SOURCE_DIR}/scripts/LVGLImage.py")
+set(LOGO_SRC "${CMAKE_SOURCE_DIR}/assets/logos")
+
+add_custom_command(
+    OUTPUT ${SPIFFS_DIR}/.stamp
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${SPIFFS_DIR}/bg
+    COMMAND python3 ${LVGL_IMAGE} --cf ARGB8888 --ofmt BIN -o ${SPIFFS_DIR} ${LOGO_SRC}/
+    COMMAND ${CMAKE_COMMAND} -E remove -f ${SPIFFS_DIR}/*_bg.bin
+    COMMAND python3 ${LVGL_IMAGE} --cf RGB565 --rgb565dither --ofmt BIN -o ${SPIFFS_DIR}/bg ${LOGO_SRC}/bg/
+    COMMAND ${CMAKE_COMMAND} -E touch ${SPIFFS_DIR}/.stamp
+    DEPENDS ${LOGO_SRC}
+    COMMENT "Converting PNG assets to LVGL binary format"
+)
+add_custom_target(convert_images DEPENDS ${SPIFFS_DIR}/.stamp)
+add_dependencies(${COMPONENT_LIB} convert_images)
+
+spiffs_create_partition_image(storage ${SPIFFS_DIR} FLASH_IN_PROJECT)

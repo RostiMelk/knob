@@ -72,6 +72,7 @@ static lv_obj_t *s_wifi_dot;
 
 // Background (blurred artwork)
 static lv_obj_t *s_bg_img;
+static lv_obj_t *s_bg_dim; // Black overlay for dimming (cheaper than image_opa)
 
 // Artwork area (center)
 static lv_obj_t *s_img_logo;
@@ -139,59 +140,16 @@ static void set_logo(int index) {
     return;
 
   const char *logo_file = STATIONS[index].logo;
-  snprintf(s_logo_path, sizeof(s_logo_path), "%s%s", LOGO_DIR, logo_file);
 
-  // ── Debug: POSIX file check ──
-  const char *posix_path = s_logo_path + 2; // skip "A:" prefix
-  FILE *f = fopen(posix_path, "rb");
-  if (f) {
-    // Check PNG signature (first 8 bytes: 89 50 4E 47 0D 0A 1A 0A)
-    uint8_t hdr[8] = {};
-    size_t n = fread(hdr, 1, 8, f);
-    fseek(f, 0, SEEK_END);
-    long sz = ftell(f);
-    fclose(f);
-    bool valid_png = (n == 8 && hdr[0] == 0x89 && hdr[1] == 'P' &&
-                      hdr[2] == 'N' && hdr[3] == 'G');
-    ESP_LOGI(TAG, "logo POSIX: %s size=%ld png=%s hdr=%02x%02x%02x%02x",
-             posix_path, sz, valid_png ? "YES" : "NO",
-             hdr[0], hdr[1], hdr[2], hdr[3]);
-  } else {
-    ESP_LOGE(TAG, "logo POSIX: %s OPEN FAILED", posix_path);
-  }
-
-  // ── Debug: LVGL FS driver check ──
-  bool fs_ready = lv_fs_is_ready('A');
-  ESP_LOGI(TAG, "logo LVGL: fs_ready('A')=%d", fs_ready);
-
-  lv_fs_file_t lv_f;
-  lv_fs_res_t res = lv_fs_open(&lv_f, s_logo_path, LV_FS_MODE_RD);
-  if (res == LV_FS_RES_OK) {
-    uint32_t br = 0;
-    uint8_t lv_hdr[8] = {};
-    lv_fs_read(&lv_f, lv_hdr, 8, &br);
-    lv_fs_close(&lv_f);
-    ESP_LOGI(TAG, "logo LVGL: %s opened OK, read %lu bytes, hdr=%02x%02x%02x%02x",
-             s_logo_path, (unsigned long)br,
-             lv_hdr[0], lv_hdr[1], lv_hdr[2], lv_hdr[3]);
-  } else {
-    ESP_LOGE(TAG, "logo LVGL: %s OPEN FAILED res=%d", s_logo_path, res);
-  }
-
-  // ── Set the image source ──
+  // Build path with .bin extension (pre-converted LVGL binary format)
+  const char *ext = strrchr(logo_file, '.');
+  size_t base_len =
+      ext ? static_cast<size_t>(ext - logo_file) : strlen(logo_file);
+  snprintf(s_logo_path, sizeof(s_logo_path), "%s%.*s.bin", LOGO_DIR,
+           static_cast<int>(base_len), logo_file);
   lv_image_set_src(s_img_logo, s_logo_path);
 
-  // ── Debug: check result after set_src ──
-  const void *src = lv_image_get_src(s_img_logo);
-  lv_image_header_t header = {};
-  lv_result_t dec_res = lv_image_decoder_get_info(s_logo_path, &header);
-  ESP_LOGI(TAG, "logo result: src=%p dec_res=%d w=%d h=%d cf=%d",
-           src, dec_res, header.w, header.h, header.cf);
-
-  const char *dot = strrchr(logo_file, '.');
-  size_t base_len =
-      dot ? static_cast<size_t>(dot - logo_file) : strlen(logo_file);
-  snprintf(s_bg_path, sizeof(s_bg_path), "%s%.*s_bg.png", BG_DIR,
+  snprintf(s_bg_path, sizeof(s_bg_path), "%s%.*s_bg.bin", BG_DIR,
            static_cast<int>(base_len), logo_file);
   lv_image_set_src(s_bg_img, s_bg_path);
 }
@@ -225,6 +183,10 @@ static void anim_arc_ind_opa_cb(void *obj, int32_t v) {
   lv_obj_set_style_arc_opa(static_cast<lv_obj_t *>(obj), v, LV_PART_INDICATOR);
 }
 
+static void anim_bg_opa_cb(void *obj, int32_t v) {
+  lv_obj_set_style_bg_opa(static_cast<lv_obj_t *>(obj), v, LV_PART_MAIN);
+}
+
 static void anim_hide_done(lv_anim_t *a) {
   lv_obj_add_flag(static_cast<lv_obj_t *>(a->var), LV_OBJ_FLAG_HIDDEN);
 }
@@ -238,7 +200,8 @@ static void anim_fade(lv_obj_t *obj, lv_anim_exec_xcb_t exec_cb, int32_t start,
   lv_anim_set_exec_cb(&a, exec_cb);
   lv_anim_set_values(&a, start, end);
   lv_anim_set_duration(&a, duration);
-  lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
+  lv_anim_set_path_cb(&a, duration <= 150 ? lv_anim_path_linear
+                                             : lv_anim_path_ease_in_out);
   if (done_cb)
     lv_anim_set_completed_cb(&a, done_cb);
   lv_anim_start(&a);
@@ -250,6 +213,14 @@ static void on_vol_hide(lv_timer_t *) {
   anim_fade(s_vol_arc, anim_arc_ind_opa_cb, LV_OPA_COVER, LV_OPA_30,
             ANIM_ARC_FADE_MS);
   lv_timer_pause(s_vol_hide_timer);
+}
+
+// ─── Browse rotation callback (deferred image load) ────────────────────────────────
+
+static void on_browse_rotate_fade_done(lv_anim_t *) {
+  set_logo(s_browse_index);
+  anim_fade(s_logo_container, anim_opa_cb, LV_OPA_TRANSP, LV_OPA_70,
+            ANIM_QUICK_MS);
 }
 
 // ─── Clock ────────────────────────────────────────────────────────────────────────────
@@ -278,6 +249,7 @@ static void show_idle_ui(bool idle) {
   lv_anim_delete(s_lbl_speaker, anim_opa_cb);
   lv_anim_delete(s_lbl_subtitle, anim_opa_cb);
   lv_anim_delete(s_bg_img, anim_img_opa_cb);
+  lv_anim_delete(s_bg_dim, anim_bg_opa_cb);
 
   if (idle) {
     update_clock();
@@ -294,11 +266,9 @@ static void show_idle_ui(bool idle) {
     anim_fade(s_lbl_speaker, anim_opa_cb, LV_OPA_60, LV_OPA_TRANSP,
               ANIM_FADE_MS, anim_hide_done);
 
-    anim_fade(s_bg_img, anim_img_opa_cb,
-              lv_obj_get_style_image_opa(s_bg_img, LV_PART_MAIN), LV_OPA_30,
-              ANIM_FADE_MS);
-
-    lv_obj_set_style_bg_color(s_screen, lv_color_black(), LV_PART_MAIN);
+    // Keep bg image at full opacity, dim with overlay instead (no expensive layer)
+    lv_obj_set_style_image_opa(s_bg_img, LV_OPA_COVER, LV_PART_MAIN);
+    anim_fade(s_bg_dim, anim_bg_opa_cb, LV_OPA_TRANSP, LV_OPA_70, ANIM_FADE_MS);
 
     lv_obj_set_style_opa(s_lbl_subtitle, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_align(s_lbl_subtitle, LV_ALIGN_CENTER, 0, 30);
@@ -326,8 +296,8 @@ static void show_idle_ui(bool idle) {
     anim_fade(s_lbl_speaker, anim_opa_cb, LV_OPA_TRANSP, LV_OPA_60,
               ANIM_FADE_MS);
 
-    anim_fade(s_bg_img, anim_img_opa_cb,
-              lv_obj_get_style_image_opa(s_bg_img, LV_PART_MAIN), LV_OPA_COVER,
+    anim_fade(s_bg_dim, anim_bg_opa_cb,
+              lv_obj_get_style_bg_opa(s_bg_dim, LV_PART_MAIN), LV_OPA_TRANSP,
               ANIM_FADE_MS);
 
     lv_obj_set_style_opa(s_lbl_subtitle, LV_OPA_TRANSP, LV_PART_MAIN);
@@ -585,6 +555,17 @@ static void home_page_build(lv_obj_t *parent) {
   lv_obj_remove_flag(s_bg_img, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_remove_flag(s_bg_img, LV_OBJ_FLAG_SCROLLABLE);
 
+  // ── Black dimming overlay (cheaper than animating image opacity) ──
+  s_bg_dim = lv_obj_create(parent);
+  lv_obj_set_size(s_bg_dim, LCD_H_RES, LCD_V_RES);
+  lv_obj_align(s_bg_dim, LV_ALIGN_CENTER, 0, 0);
+  lv_obj_set_style_bg_color(s_bg_dim, lv_color_black(), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(s_bg_dim, LV_OPA_TRANSP, LV_PART_MAIN);
+  lv_obj_set_style_border_width(s_bg_dim, 0, LV_PART_MAIN);
+  lv_obj_set_style_radius(s_bg_dim, 0, LV_PART_MAIN);
+  lv_obj_remove_flag(s_bg_dim, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_remove_flag(s_bg_dim, LV_OBJ_FLAG_SCROLLABLE);
+
   // ── Volume arc — hugs the edge of the round display ──
   s_vol_arc = lv_arc_create(parent);
   lv_obj_set_size(s_vol_arc, LCD_H_RES - 4, LCD_V_RES - 4);
@@ -610,11 +591,11 @@ static void home_page_build(lv_obj_t *parent) {
   lv_obj_set_style_border_width(s_logo_container, 0, LV_PART_MAIN);
   lv_obj_set_style_pad_all(s_logo_container, 0, LV_PART_MAIN);
   lv_obj_set_style_clip_corner(s_logo_container, true, LV_PART_MAIN);
-  lv_obj_set_style_shadow_width(s_logo_container, 50, LV_PART_MAIN);
-  lv_obj_set_style_shadow_spread(s_logo_container, 6, LV_PART_MAIN);
+  lv_obj_set_style_shadow_width(s_logo_container, 20, LV_PART_MAIN);
+  lv_obj_set_style_shadow_spread(s_logo_container, 2, LV_PART_MAIN);
   lv_obj_set_style_shadow_color(s_logo_container, lv_color_black(),
                                 LV_PART_MAIN);
-  lv_obj_set_style_shadow_opa(s_logo_container, LV_OPA_60, LV_PART_MAIN);
+  lv_obj_set_style_shadow_opa(s_logo_container, LV_OPA_40, LV_PART_MAIN);
   lv_obj_remove_flag(s_logo_container, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_remove_flag(s_logo_container, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_align(s_logo_container, LV_ALIGN_CENTER, 0, -30);
@@ -1016,16 +997,16 @@ void ui_on_encoder_rotate(int32_t steps) {
     s_browse_index =
         ((new_idx % STATION_COUNT) + STATION_COUNT) % STATION_COUNT;
     lv_label_set_text(s_lbl_station, STATIONS[s_browse_index].name);
-    set_logo(s_browse_index);
+
+    // Fade out logo, decode new image in callback, then fade in
+    lv_anim_delete(s_logo_container, anim_opa_cb);
+    anim_fade(s_logo_container, anim_opa_cb,
+              lv_obj_get_style_opa(s_logo_container, LV_PART_MAIN),
+              LV_OPA_TRANSP, ANIM_QUICK_MS / 2, on_browse_rotate_fade_done);
 
     lv_anim_delete(s_lbl_station, anim_opa_cb);
     lv_obj_set_style_opa(s_lbl_station, LV_OPA_TRANSP, LV_PART_MAIN);
     anim_fade(s_lbl_station, anim_opa_cb, LV_OPA_TRANSP, LV_OPA_COVER,
-              ANIM_QUICK_MS);
-
-    lv_anim_delete(s_logo_container, anim_opa_cb);
-    lv_obj_set_style_opa(s_logo_container, LV_OPA_TRANSP, LV_PART_MAIN);
-    anim_fade(s_logo_container, anim_opa_cb, LV_OPA_TRANSP, LV_OPA_70,
               ANIM_QUICK_MS);
 
     char pos[24];
