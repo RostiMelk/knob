@@ -6,6 +6,8 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 
+#include <inttypes.h>
+
 static constexpr const char *TAG = "encoder";
 
 static constexpr int PCNT_HIGH_LIMIT = 100;
@@ -24,12 +26,20 @@ static void on_poll(void *) {
   if (delta == 0)
     return;
 
-  s_last_count = count;
+  // Log raw values BEFORE threshold — this fires on any movement,
+  // even sub-detent. If you see these but no "steps" lines, the
+  // divisor is wrong for this encoder.
+  ESP_LOGI(TAG, "raw: count=%d last=%d delta=%d", count, s_last_count, delta);
 
-  int32_t steps = delta / 2;
+  // Quadrature encoder: 4 counts per detent. Only emit whole-detent steps
+  // to avoid jitter/bounce causing spurious events.
+  int32_t steps = delta / 4;
   if (steps == 0)
-    steps = (delta > 0) ? 1 : -1;
+    return;
 
+  s_last_count += steps * 4; // consume only full detents
+
+  ESP_LOGI(TAG, "step: steps=%" PRId32 " (new_last=%d)", steps, s_last_count);
   esp_event_post(APP_EVENT, APP_EVENT_ENCODER_ROTATE, &steps, sizeof(steps), 0);
 }
 
@@ -87,5 +97,6 @@ void encoder_init() {
   ESP_ERROR_CHECK(
       esp_timer_start_periodic(s_poll_timer, POLL_INTERVAL_MS * 1000LL));
 
-  ESP_LOGI(TAG, "Encoder ready (A=%d B=%d)", PIN_ENC_A, PIN_ENC_B);
+  ESP_LOGI(TAG, "Encoder ready (A=%d B=%d, poll=%dms, divisor=4)",
+           PIN_ENC_A, PIN_ENC_B, POLL_INTERVAL_MS);
 }
