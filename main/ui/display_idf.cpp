@@ -298,7 +298,7 @@ static void init_lcd() {
 
   esp_lcd_panel_dev_config_t panel_cfg = {};
   panel_cfg.reset_gpio_num = -1; // Already reset above via direct GPIO
-  panel_cfg.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB;
+  panel_cfg.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_BGR;
   panel_cfg.bits_per_pixel = 16;
   panel_cfg.vendor_config = &vendor_cfg;
   ESP_ERROR_CHECK(
@@ -339,6 +339,8 @@ static void init_touch_hw() {
   touch_cfg.y_max = LCD_V_RES;
   touch_cfg.rst_gpio_num = static_cast<gpio_num_t>(PIN_TOUCH_RST);
   touch_cfg.int_gpio_num = static_cast<gpio_num_t>(PIN_TOUCH_INT);
+  touch_cfg.flags.mirror_x = true;
+  touch_cfg.flags.mirror_y = true;
 
   ESP_ERROR_CHECK(
       esp_lcd_touch_new_i2c_cst816s(touch_io, &touch_cfg, &s_touch));
@@ -366,8 +368,8 @@ void display_init(lv_display_t **disp, lv_indev_t **touch) {
       .rotation =
           {
               .swap_xy = false,
-              .mirror_x = false,
-              .mirror_y = false,
+              .mirror_x = true,
+              .mirror_y = true,
           },
       .flags =
           {
