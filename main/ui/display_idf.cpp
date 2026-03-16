@@ -317,6 +317,7 @@ static void init_touch_hw() {
   i2c_bus_cfg.i2c_port = static_cast<i2c_port_num_t>(TOUCH_I2C_NUM);
   i2c_bus_cfg.sda_io_num = static_cast<gpio_num_t>(PIN_TOUCH_SDA);
   i2c_bus_cfg.scl_io_num = static_cast<gpio_num_t>(PIN_TOUCH_SCL);
+  i2c_bus_cfg.clk_source = I2C_CLK_SRC_DEFAULT;
   i2c_bus_cfg.flags.enable_internal_pullup = true;
 
   ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &s_i2c_bus));
