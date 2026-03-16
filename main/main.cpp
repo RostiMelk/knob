@@ -138,7 +138,7 @@ static void on_wifi_connected(void *, esp_event_base_t, int32_t, void *) {
     ui_set_speaker_name(CONFIG_RADIO_SONOS_SPEAKER_IP);
     sonos_start();
   } else {
-    xTaskCreatePinnedToCore(discover_and_connect_task, "discover", 6144,
+    xTaskCreatePinnedToCore(discover_and_connect_task, "discover", 8192,
                             nullptr, NET_TASK_PRIO, nullptr, NET_TASK_CORE);
   }
 }
