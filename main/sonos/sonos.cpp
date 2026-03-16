@@ -188,7 +188,7 @@ static bool xml_extract(const char *xml, const char *tag, char *out,
 
 static void exec_play_uri(const char *uri) {
   // Sonos requires x-rincon-mp3radio:// for internet radio streams
-  char fixed_uri[256];
+  char fixed_uri[280]; // 256 max URI + 20 char prefix
   if (strncmp(uri, "https://", 8) == 0) {
     snprintf(fixed_uri, sizeof(fixed_uri), "x-rincon-mp3radio://%s", uri + 8);
   } else if (strncmp(uri, "http://", 7) == 0) {
