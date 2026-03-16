@@ -55,7 +55,9 @@ CONFIG_LV_USE_FS_POSIX=y
 CONFIG_LV_FS_POSIX_LETTER=65
 CONFIG_LV_USE_LODEPNG=y
 
-# LVGL memory: use C stdlib malloc so allocations >16KB go to PSRAM
-# (default LV_USE_BUILTIN_MALLOC has a 64KB pool — too small for PNG decode)
+# LVGL memory: use C stdlib malloc so large allocations go to PSRAM
+# (Kconfig choice: must explicitly disable builtin to switch)
+# CONFIG_LV_USE_BUILTIN_MALLOC is not set
 CONFIG_LV_USE_CLIB_MALLOC=y
+# CONFIG_LV_USE_BUILTIN_STRING is not set
 CONFIG_LV_USE_CLIB_STRING=y
