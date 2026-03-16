@@ -199,12 +199,14 @@ static void exec_play_uri(const char *uri) {
   }
 
   char inner[512];
+  ESP_LOGI(TAG, "SetAVTransportURI: input='%s' → fixed='%s'", uri, fixed_uri);
   snprintf(inner, sizeof(inner), SET_URI_FMT, fixed_uri);
 
   // Use soap_request (not soap_fire) so we can log error responses
   static char resp_buf[512];
   Response resp = {resp_buf, 0, static_cast<int>(sizeof(resp_buf))};
 
+  ESP_LOGD(TAG, "SOAP body: %.400s", inner);
   resp.len = 0;
   if (soap_request(AV_TRANSPORT_PATH, "SetAVTransportURI", AV_TRANSPORT_NS,
                    inner, &resp)) {
