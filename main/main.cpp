@@ -40,7 +40,8 @@ static void on_station_changed(void *, esp_event_base_t, int32_t, void *data) {
     return;
   s_station_index = index;
   settings_set_station_index(s_station_index);
-  sonos_play_uri(STATIONS[s_station_index].url);
+  // Note: don't play here — on_play_requested handles playback.
+  // confirm_browse() posts both STATION_CHANGED and PLAY_REQUESTED.
 }
 
 static void on_volume_changed(void *, esp_event_base_t, int32_t, void *data) {
