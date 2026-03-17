@@ -861,6 +861,25 @@ void ui_init() {
 
     show_idle_ui(true);
 
+    // Pre-warm LVGL image cache — load all station logos + backgrounds from SPIFFS.
+    // First load is ~120ms per image (SPIFFS I/O), but once cached, <2ms.
+    // Total: ~12 stations × 2 images × ~120ms ≈ 3s at boot. Worth it for
+    // instant station switching afterwards.
+    ESP_LOGI(TAG, "Pre-warming image cache (%d stations)...", STATION_COUNT);
+    int64_t preload_start = esp_timer_get_time();
+    for (int i = 0; i < STATION_COUNT; i++) {
+      set_logo(i);
+      // Yield the display lock briefly so LVGL can flush if needed
+      display_unlock();
+      vTaskDelay(pdMS_TO_TICKS(1));
+      display_lock(200);
+    }
+    // Restore to the saved station
+    set_logo(s_station_index);
+    int64_t preload_end = esp_timer_get_time();
+    ESP_LOGI(TAG, "Image cache warm: %lld ms",
+             (long long)(preload_end - preload_start) / 1000);
+
     char saved_name[64] = {};
     settings_get_speaker_name(saved_name, sizeof(saved_name));
     if (saved_name[0])
