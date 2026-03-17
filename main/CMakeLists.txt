@@ -54,10 +54,10 @@ target_compile_options(${COMPONENT_LIB} PUBLIC
 
 # ── Image conversion: PNG → LVGL .bin → memory-mapped flash assets ───────────
 # Logos: ARGB8888 (preserves alpha). Backgrounds: RGB565 + dithering (fixes banding).
-# Output goes to build/mmap_data/ which gets packed into the 'assets' flash partition.
+# Output goes to build/assets/ which gets packed into the 'assets' flash partition.
 # At runtime, images are memory-mapped (zero-copy from flash via MMU).
 
-set(MMAP_DIR "${CMAKE_BINARY_DIR}/mmap_data")
+set(MMAP_DIR "${CMAKE_BINARY_DIR}/assets")
 # LVGLImage.py ships with LVGL — use the managed component copy
 # (downloaded automatically by idf.py build via idf_component.yml)
 set(LVGL_IMAGE "${CMAKE_SOURCE_DIR}/managed_components/lvgl__lvgl/scripts/LVGLImage.py")
