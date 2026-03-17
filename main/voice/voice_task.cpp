@@ -8,6 +8,7 @@
 #include "app_config.h"
 #include "storage/settings.h"
 
+#include "esp_crt_bundle.h"
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_tls.h"
