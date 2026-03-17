@@ -16,6 +16,9 @@ set(SRCS
     "voice/voice_session.cpp"
     "voice/voice_protocol.cpp"
     "voice/tools_radio.cpp"
+    "voice/voice_task.cpp"
+    "voice/voice_mic.cpp"
+    "voice/voice_audio.cpp"
     "ui/ui.cpp"
     "ui/ui_pages.cpp"
     "ui/ui_timer.cpp"
@@ -37,10 +40,12 @@ idf_component_register(
         esp_lcd
         esp_timer
         esp_wifi
+        esp_websocket_client
         nvs_flash
     PRIV_REQUIRES
         esp_netif
         esp_psram
+        esp_tls
         fatfs
         sdmmc
         spiffs
@@ -52,36 +57,27 @@ target_compile_options(${COMPONENT_LIB} PUBLIC
     -fno-rtti
 )
 
-# ── Image conversion: PNG → LVGL .bin → memory-mapped flash assets ───────────
+# ── Image conversion: PNG → LVGL .bin at build time ──────────────────────────────
 # Logos: ARGB8888 (preserves alpha). Backgrounds: RGB565 + dithering (fixes banding).
-# Output goes to build/assets/ which gets packed into the 'assets' flash partition.
-# At runtime, images are memory-mapped (zero-copy from flash via MMU).
+# Output goes to build/spiffs_data/ which gets packed into the SPIFFS partition.
 
-set(MMAP_DIR "${CMAKE_BINARY_DIR}/assets")
+set(SPIFFS_DIR "${CMAKE_BINARY_DIR}/spiffs_data")
 # LVGLImage.py ships with LVGL — use the managed component copy
 # (downloaded automatically by idf.py build via idf_component.yml)
 set(LVGL_IMAGE "${CMAKE_SOURCE_DIR}/managed_components/lvgl__lvgl/scripts/LVGLImage.py")
 set(LOGO_SRC "${CMAKE_SOURCE_DIR}/assets/logos")
 
 add_custom_command(
-    OUTPUT ${MMAP_DIR}/.stamp
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${MMAP_DIR}
-    COMMAND python3 ${LVGL_IMAGE} --cf ARGB8888 --ofmt BIN -o ${MMAP_DIR} ${LOGO_SRC}/
-    COMMAND ${CMAKE_COMMAND} -E remove -f ${MMAP_DIR}/*_bg.bin
-    COMMAND python3 ${LVGL_IMAGE} --cf RGB565 --rgb565dither --ofmt BIN -o ${MMAP_DIR} ${LOGO_SRC}/bg/
-    COMMAND ${CMAKE_COMMAND} -E touch ${MMAP_DIR}/.stamp
+    OUTPUT ${SPIFFS_DIR}/.stamp
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${SPIFFS_DIR}/bg
+    COMMAND python3 ${LVGL_IMAGE} --cf ARGB8888 --ofmt BIN -o ${SPIFFS_DIR} ${LOGO_SRC}/
+    COMMAND ${CMAKE_COMMAND} -E remove -f ${SPIFFS_DIR}/*_bg.bin
+    COMMAND python3 ${LVGL_IMAGE} --cf RGB565 --rgb565dither --ofmt BIN -o ${SPIFFS_DIR}/bg ${LOGO_SRC}/bg/
+    COMMAND ${CMAKE_COMMAND} -E touch ${SPIFFS_DIR}/.stamp
     DEPENDS ${LOGO_SRC}
     COMMENT "Converting PNG assets to LVGL binary format"
 )
-add_custom_target(convert_images DEPENDS ${MMAP_DIR}/.stamp)
+add_custom_target(convert_images DEPENDS ${SPIFFS_DIR}/.stamp)
 add_dependencies(${COMPONENT_LIB} convert_images)
 
-# spiffs_create_partition_assets packs files into a binary blob with an index table.
-# Despite the name, this has nothing to do with SPIFFS filesystem — it creates a
-# flat binary that can be memory-mapped at runtime via esp_mmap_assets.
-spiffs_create_partition_assets(
-    assets
-    ${MMAP_DIR}
-    FLASH_IN_PROJECT
-    MMAP_FILE_SUPPORT_FORMAT ".bin"
-)
+spiffs_create_partition_image(storage ${SPIFFS_DIR} FLASH_IN_PROJECT)

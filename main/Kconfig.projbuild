@@ -45,4 +45,12 @@ menu "Sonos Radio"
               UK:          GMT0BST,M3.5.0/1,M10.5.0
               Japan:       JST-9
 
+    config RADIO_OPENAI_API_KEY
+        string "OpenAI API key for voice mode"
+        default ""
+        help
+            API key for OpenAI Realtime API. Required for voice assistant.
+            Set via .env file on SD card (OPENAI_API_KEY=sk-proj-...) or
+            pass directly here for development.
+
 endmenu

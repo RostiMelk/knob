@@ -201,6 +201,7 @@ if [ -f "$ENV_FILE" ]; then
   WIFI_PASS=""
   SPEAKER_IP=""
   TIMEZONE=""
+  OPENAI_API_KEY=""
 
   while IFS= read -r line || [ -n "$line" ]; do
     # Skip empty lines and comments
@@ -214,6 +215,7 @@ if [ -f "$ENV_FILE" ]; then
         WIFI_PASS)  WIFI_PASS="$val" ;;
         SPEAKER_IP) SPEAKER_IP="$val" ;;
         TIMEZONE)   TIMEZONE="$val" ;;
+        OPENAI_API_KEY) OPENAI_API_KEY="$val" ;;
       esac
     fi
   done < "$ENV_FILE"
@@ -249,6 +251,11 @@ if [ -f "$ENV_FILE" ]; then
 
   if [ -n "$TIMEZONE" ]; then
     set_sdkconfig "CONFIG_RADIO_TIMEZONE" "$TIMEZONE"
+    INJECTED=true
+  fi
+
+  if [ -n "$OPENAI_API_KEY" ]; then
+    set_sdkconfig "CONFIG_RADIO_OPENAI_API_KEY" "$OPENAI_API_KEY"
     INJECTED=true
   fi
 
