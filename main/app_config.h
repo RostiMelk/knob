@@ -17,7 +17,7 @@ constexpr int PIN_LCD_BL = 47;
 constexpr int LCD_H_RES = 360;
 constexpr int LCD_V_RES = 360;
 constexpr int LCD_DRAW_ROWS =
-    24; // partial rows per flush — 15 flushes/frame, ~26KB per DMA buffer (RGB888)
+    36; // partial rows per flush — 10 flushes/frame, ~26KB per DMA buffer
 constexpr int LCD_BL_LEDC_CH = 0;
 
 // ─── Touch: CST816D I2C ─────────────────────────────────────────────────────
@@ -99,7 +99,7 @@ constexpr Station STATIONS[] = {
      "nrk_jazz.png", 0x2D1B69},
     {"NRK Nyheter",
      "http://cdn0-47115-liveicecast0.dna.contentdelivery.net/nyheter_aac_h",
-     "nrk_nyheter.png", 0x1A2A3A},
+     "nrk_nyheter.png", 0x1A2A3E},
     {"P4 Norge", "http://p4.p4groupaudio.com/P04_MM", "p4.png", 0x8B1A1A},
     {"P5 Hits", "http://p5.p4groupaudio.com/P05_MM", "p5.png", 0x1A5C2E},
     {"P9 Retro", "http://p9.p4groupaudio.com/P09_MH", "p9.png", 0x6B3A1A},
