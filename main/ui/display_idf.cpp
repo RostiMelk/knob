@@ -369,8 +369,8 @@ void display_init(lv_display_t **disp, lv_indev_t **touch) {
   disp_cfg.rotation.swap_xy = false;
   disp_cfg.rotation.mirror_x = true;
   disp_cfg.rotation.mirror_y = true;
-  disp_cfg.flags.buff_dma = true;
-  disp_cfg.flags.buff_spiram = false;
+  disp_cfg.flags.buff_dma = false;
+  disp_cfg.flags.buff_spiram = true;
   disp_cfg.flags.sw_rotate = false;
   disp_cfg.flags.swap_bytes = true;
   disp_cfg.flags.full_refresh = false;
@@ -383,7 +383,7 @@ void display_init(lv_display_t **disp, lv_indev_t **touch) {
   touch_port_cfg.handle = s_touch;
   *touch = lvgl_port_add_touch(&touch_port_cfg);
 
-  ESP_LOGI(TAG, "LVGL port initialized (RGB565, swap_bytes=true, %d rows)", LCD_DRAW_ROWS);
+  ESP_LOGI(TAG, "LVGL port initialized (RGB565, swap_bytes=true, %d rows, PSRAM buffers)", LCD_DRAW_ROWS);
 }
 
 bool display_lock(int timeout_ms) { return lvgl_port_lock(timeout_ms); }
