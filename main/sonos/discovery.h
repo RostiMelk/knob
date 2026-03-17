@@ -18,3 +18,6 @@ struct DiscoveryResult {
 
 void discovery_init();
 int discovery_scan(DiscoveryResult *out, int timeout_ms = DISCOVERY_TIMEOUT_MS);
+
+// Fetch speaker room name from device description XML at ip:port
+bool discovery_get_speaker_name(const char *ip, int port, char *name, size_t name_len);

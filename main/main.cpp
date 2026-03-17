@@ -134,9 +134,19 @@ static void on_wifi_connected(void *, esp_event_base_t, int32_t, void *) {
     // Use .env-configured speaker IP directly (skip discovery)
     ESP_LOGI(TAG, "Using configured speaker: %s", CONFIG_RADIO_SONOS_SPEAKER_IP);
     sonos_set_speaker(CONFIG_RADIO_SONOS_SPEAKER_IP);
-    settings_set_speaker_name(CONFIG_RADIO_SONOS_SPEAKER_IP);
-    ui_set_speaker_name(CONFIG_RADIO_SONOS_SPEAKER_IP);
     sonos_start();
+
+    // Resolve speaker name from device description
+    char speaker_name[64] = {};
+    if (discovery_get_speaker_name(CONFIG_RADIO_SONOS_SPEAKER_IP, 1400,
+                                    speaker_name, sizeof(speaker_name)) &&
+        speaker_name[0]) {
+      ESP_LOGI(TAG, "Speaker name: %s", speaker_name);
+    } else {
+      strncpy(speaker_name, CONFIG_RADIO_SONOS_SPEAKER_IP, sizeof(speaker_name) - 1);
+    }
+    settings_set_speaker_name(speaker_name);
+    ui_set_speaker_name(speaker_name);
   } else {
     xTaskCreatePinnedToCore(discover_and_connect_task, "discover", 10240,
                             nullptr, NET_TASK_PRIO, nullptr, NET_TASK_CORE);
