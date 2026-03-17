@@ -645,7 +645,7 @@ static void home_page_build(lv_obj_t *parent) {
   // ── Clock — large centered time, visible when idle ──
   s_lbl_clock = lv_label_create(parent);
   lv_obj_set_style_text_color(s_lbl_clock, COL_TEXT, LV_PART_MAIN);
-  lv_obj_set_style_text_font(s_lbl_clock, &geist_mono_medium_48, LV_PART_MAIN);
+  lv_obj_set_style_text_font(s_lbl_clock, &geist_medium_52, LV_PART_MAIN);
   lv_obj_set_style_text_opa(s_lbl_clock, LV_OPA_90, LV_PART_MAIN);
   lv_label_set_text(s_lbl_clock, "00:00");
   lv_obj_align(s_lbl_clock, LV_ALIGN_CENTER, 0, -20);
@@ -653,7 +653,7 @@ static void home_page_build(lv_obj_t *parent) {
   // ── Station name ──
   s_lbl_station = lv_label_create(parent);
   lv_obj_set_style_text_color(s_lbl_station, COL_TEXT, LV_PART_MAIN);
-  lv_obj_set_style_text_font(s_lbl_station, &geist_medium_24, LV_PART_MAIN);
+  lv_obj_set_style_text_font(s_lbl_station, &geist_medium_28, LV_PART_MAIN);
   lv_obj_set_width(s_lbl_station, LCD_H_RES - 80);
   lv_label_set_long_mode(s_lbl_station, LV_LABEL_LONG_SCROLL_CIRCULAR);
   lv_obj_set_style_text_align(s_lbl_station, LV_TEXT_ALIGN_CENTER,
@@ -665,7 +665,7 @@ static void home_page_build(lv_obj_t *parent) {
   s_lbl_subtitle = lv_label_create(parent);
   lv_obj_set_style_text_color(s_lbl_subtitle, lv_color_hex(0xAAAAAA),
                               LV_PART_MAIN);
-  lv_obj_set_style_text_font(s_lbl_subtitle, &geist_regular_14, LV_PART_MAIN);
+  lv_obj_set_style_text_font(s_lbl_subtitle, &geist_regular_16, LV_PART_MAIN);
   lv_label_set_text(s_lbl_subtitle, "");
   lv_obj_align(s_lbl_subtitle, LV_ALIGN_CENTER, 0, 94);
 
@@ -673,7 +673,7 @@ static void home_page_build(lv_obj_t *parent) {
   s_lbl_position = lv_label_create(parent);
   lv_obj_set_style_text_color(s_lbl_position, lv_color_hex(0x888888),
                               LV_PART_MAIN);
-  lv_obj_set_style_text_font(s_lbl_position, &geist_regular_14, LV_PART_MAIN);
+  lv_obj_set_style_text_font(s_lbl_position, &geist_regular_16, LV_PART_MAIN);
   lv_label_set_text(s_lbl_position, "");
   lv_obj_align(s_lbl_position, LV_ALIGN_CENTER, 0, 116);
   lv_obj_add_flag(s_lbl_position, LV_OBJ_FLAG_HIDDEN);
@@ -681,7 +681,7 @@ static void home_page_build(lv_obj_t *parent) {
   // ── Speaker name — bottom, very subtle ──
   s_lbl_speaker = lv_label_create(parent);
   lv_obj_set_style_text_color(s_lbl_speaker, COL_TEXT_SEC, LV_PART_MAIN);
-  lv_obj_set_style_text_font(s_lbl_speaker, &geist_regular_14, LV_PART_MAIN);
+  lv_obj_set_style_text_font(s_lbl_speaker, &geist_regular_16, LV_PART_MAIN);
   lv_obj_set_style_text_opa(s_lbl_speaker, LV_OPA_60, LV_PART_MAIN);
   lv_label_set_text(s_lbl_speaker, "");
   lv_obj_align(s_lbl_speaker, LV_ALIGN_BOTTOM_MID, 0, -36);
@@ -780,7 +780,7 @@ static void rebuild_speaker_list() {
 
   lv_obj_t *title = lv_label_create(s_scr_speaker_picker);
   lv_obj_set_style_text_color(title, COL_TEXT, LV_PART_MAIN);
-  lv_obj_set_style_text_font(title, &geist_regular_20, LV_PART_MAIN);
+  lv_obj_set_style_text_font(title, &geist_regular_22, LV_PART_MAIN);
   lv_label_set_text(title, "Select Speaker");
 
   for (int i = 0; i < s_discovered.count; i++) {

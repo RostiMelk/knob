@@ -48,11 +48,11 @@ target_link_libraries(lvgl PUBLIC ${SDL2_LIBRARIES})
 add_executable(sim
     sim_main.cpp
     display_sdl.cpp
-    "${CMAKE_CURRENT_SOURCE_DIR}/../main/fonts/geist_regular_14.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../main/fonts/geist_regular_18.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/../main/fonts/geist_regular_16.c"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../main/fonts/geist_regular_20.c"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../main/fonts/geist_medium_24.c"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../main/fonts/geist_mono_medium_48.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../main/fonts/geist_regular_22.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../main/fonts/geist_medium_28.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../main/fonts/geist_medium_52.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/../main/ui/ui.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../main/ui/ui_pages.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../main/ui/ui_timer.cpp"

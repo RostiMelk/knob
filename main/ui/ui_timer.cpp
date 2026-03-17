@@ -99,7 +99,7 @@ static void page_build(lv_obj_t *parent) {
   // Countdown text
   s_lbl_time = lv_label_create(parent);
   lv_obj_set_style_text_color(s_lbl_time, COL_T_TEXT, LV_PART_MAIN);
-  lv_obj_set_style_text_font(s_lbl_time, &geist_mono_medium_48, LV_PART_MAIN);
+  lv_obj_set_style_text_font(s_lbl_time, &geist_medium_52, LV_PART_MAIN);
   lv_obj_set_style_text_align(s_lbl_time, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
   lv_obj_set_width(s_lbl_time, 200);
   lv_label_set_text(s_lbl_time, "0:00");
@@ -108,7 +108,7 @@ static void page_build(lv_obj_t *parent) {
   // Label text (below countdown)
   s_lbl_label = lv_label_create(parent);
   lv_obj_set_style_text_color(s_lbl_label, COL_T_LABEL, LV_PART_MAIN);
-  lv_obj_set_style_text_font(s_lbl_label, &geist_regular_16, LV_PART_MAIN);
+  lv_obj_set_style_text_font(s_lbl_label, &geist_regular_18, LV_PART_MAIN);
   lv_obj_set_style_text_align(s_lbl_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
   lv_obj_set_width(s_lbl_label, LCD_H_RES - 80);
   lv_label_set_long_mode(s_lbl_label, LV_LABEL_LONG_DOT);
@@ -118,7 +118,7 @@ static void page_build(lv_obj_t *parent) {
   // "Done!" text (hidden until timer fires)
   s_lbl_done = lv_label_create(parent);
   lv_obj_set_style_text_color(s_lbl_done, COL_T_DONE, LV_PART_MAIN);
-  lv_obj_set_style_text_font(s_lbl_done, &geist_medium_24, LV_PART_MAIN);
+  lv_obj_set_style_text_font(s_lbl_done, &geist_medium_28, LV_PART_MAIN);
   lv_label_set_text(s_lbl_done, "Done!");
   lv_obj_align(s_lbl_done, LV_ALIGN_CENTER, 0, -10);
   lv_obj_add_flag(s_lbl_done, LV_OBJ_FLAG_HIDDEN);
