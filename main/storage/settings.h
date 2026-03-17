@@ -5,7 +5,6 @@
 
 void settings_init();
 
-bool settings_mount_spiffs();
 bool settings_load_config_from_sd();
 
 int settings_get_volume();

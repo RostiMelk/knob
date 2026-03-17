@@ -53,9 +53,8 @@ CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
 # Console via USB-UART bridge
 CONFIG_ESP_CONSOLE_UART_DEFAULT=y
 
-# LVGL filesystem (POSIX)
-CONFIG_LV_USE_FS_POSIX=y
-CONFIG_LV_FS_POSIX_LETTER=65
+# LVGL filesystem — POSIX no longer needed (images are memory-mapped from flash).
+# Keep FS_POSIX disabled to save code size.
 
 # LVGL memory: use C stdlib malloc so large allocations go to PSRAM
 # (Kconfig choice: must explicitly disable builtin to switch)

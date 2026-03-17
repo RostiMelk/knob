@@ -11,6 +11,8 @@
 
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_mmap_assets.h"
+#include "mmap_generate_assets.h"
 #include "lvgl.h"
 
 #include <algorithm>
@@ -119,42 +121,83 @@ static DiscoveryResult s_discovered;
 static int s_speaker_highlight;
 static bool s_on_picker;
 
-// ─── Logo Path ──────────────────────────────────────────────────────────────────────────
+// ─── Memory-Mapped Image Assets ─────────────────────────────────────────────────────────
+// Images are memory-mapped from flash (zero-copy via MMU). No filesystem overhead.
+// The mmap handle is initialized in ui_init() and persists for the app lifetime.
 
-#ifdef SIMULATOR
-static constexpr const char *LOGO_DIR = "A:assets/logos/";
-#else
-static constexpr const char *LOGO_DIR = "A:/spiffs/";
-#endif
+static mmap_assets_handle_t s_mmap_handle;
 
-static char s_logo_path[128];
-static char s_bg_path[128];
+// Persistent image descriptors — must outlive the LVGL widgets that reference them.
+// LVGL reads pixel data directly from the flash pointer in these descriptors.
+static lv_image_dsc_t s_logo_dsc;
+static lv_image_dsc_t s_bg_dsc;
 
-#ifdef SIMULATOR
-static constexpr const char *BG_DIR = "A:assets/logos/bg/";
-#else
-static constexpr const char *BG_DIR = "A:/spiffs/bg/";
-#endif
+// Lookup table mapping station index → mmap asset indices.
+// Built at init time from the auto-generated enum in mmap_generate_assets.h.
+struct StationAssets {
+  int logo_idx;  // -1 if not found
+  int bg_idx;    // -1 if not found
+};
+static StationAssets s_station_assets[STATION_COUNT];
+
+// Find an asset index by name (case-insensitive substring match on filename)
+static int find_asset_by_name(const char *name) {
+  int count = mmap_assets_get_stored_files(s_mmap_handle);
+  for (int i = 0; i < count; i++) {
+    const char *asset_name = mmap_assets_get_name(s_mmap_handle, i);
+    if (asset_name && strstr(asset_name, name)) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+// Build the station → asset lookup table
+static void build_asset_lookup() {
+  for (int i = 0; i < STATION_COUNT; i++) {
+    const char *logo_file = STATIONS[i].logo;
+    const char *ext = strrchr(logo_file, '.');
+    size_t base_len = ext ? static_cast<size_t>(ext - logo_file) : strlen(logo_file);
+
+    // Build expected .bin filenames
+    char logo_name[64], bg_name[64];
+    snprintf(logo_name, sizeof(logo_name), "%.*s.bin", static_cast<int>(base_len), logo_file);
+    snprintf(bg_name, sizeof(bg_name), "%.*s_bg.bin", static_cast<int>(base_len), logo_file);
+
+    s_station_assets[i].logo_idx = find_asset_by_name(logo_name);
+    s_station_assets[i].bg_idx = find_asset_by_name(bg_name);
+
+    if (s_station_assets[i].logo_idx < 0) {
+      ESP_LOGW("UI", "Logo not found for station %d: %s", i, logo_name);
+    }
+    if (s_station_assets[i].bg_idx < 0) {
+      ESP_LOGW("UI", "Background not found for station %d: %s", i, bg_name);
+    }
+  }
+}
 
 static void set_logo(int index) {
   if (index < 0 || index >= STATION_COUNT)
     return;
 
-  const char *logo_file = STATIONS[index].logo;
-
-  // Build path with .bin extension (pre-converted LVGL binary format)
-  const char *ext = strrchr(logo_file, '.');
-  size_t base_len =
-      ext ? static_cast<size_t>(ext - logo_file) : strlen(logo_file);
-  snprintf(s_logo_path, sizeof(s_logo_path), "%s%.*s.bin", LOGO_DIR,
-           static_cast<int>(base_len), logo_file);
   int64_t t0 = esp_timer_get_time();
-  lv_image_set_src(s_img_logo, s_logo_path);
+
+  // Set logo from mmap (zero-copy flash pointer)
+  int logo_idx = s_station_assets[index].logo_idx;
+  if (logo_idx >= 0) {
+    s_logo_dsc.data = mmap_assets_get_mem(s_mmap_handle, logo_idx);
+    s_logo_dsc.data_size = mmap_assets_get_size(s_mmap_handle, logo_idx);
+    lv_image_set_src(s_img_logo, &s_logo_dsc);
+  }
   int64_t t1 = esp_timer_get_time();
 
-  snprintf(s_bg_path, sizeof(s_bg_path), "%s%.*s_bg.bin", BG_DIR,
-           static_cast<int>(base_len), logo_file);
-  lv_image_set_src(s_bg_img, s_bg_path);
+  // Set background from mmap
+  int bg_idx = s_station_assets[index].bg_idx;
+  if (bg_idx >= 0) {
+    s_bg_dsc.data = mmap_assets_get_mem(s_mmap_handle, bg_idx);
+    s_bg_dsc.data_size = mmap_assets_get_size(s_mmap_handle, bg_idx);
+    lv_image_set_src(s_bg_img, &s_bg_dsc);
+  }
   int64_t t2 = esp_timer_get_time();
 
   ESP_LOGI("PERF", "set_logo[%d]: logo=%lld us  bg=%lld us  total=%lld us",
@@ -400,6 +443,25 @@ static void exit_browse() {
     anim_fade(s_lbl_subtitle, anim_opa_cb, LV_OPA_TRANSP, LV_OPA_COVER,
               ANIM_QUICK_MS);
   } else {
+    // Initialize memory-mapped image assets from flash
+    const mmap_assets_config_t mmap_cfg = {
+        .partition_label = "assets",
+        .max_files = MMAP_ASSETS_FILES,
+        .checksum = MMAP_ASSETS_CHECKSUM,
+        .flags = {
+            .mmap_enable = true,
+            .app_bin_check = true,
+        },
+    };
+    esp_err_t mmap_err = mmap_assets_new(&mmap_cfg, &s_mmap_handle);
+    if (mmap_err == ESP_OK) {
+      ESP_LOGI(TAG, "Mapped %d image assets from flash",
+               mmap_assets_get_stored_files(s_mmap_handle));
+      build_asset_lookup();
+    } else {
+      ESP_LOGE(TAG, "Failed to map image assets: %s", esp_err_to_name(mmap_err));
+    }
+
     show_idle_ui(true);
   }
 
