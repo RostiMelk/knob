@@ -182,6 +182,20 @@ static bool extract_attr(const char *xml, const char *attr_name,
   return true;
 }
 
+// Decode XML entities in-place: &lt; → <, &gt; → >, &quot; → ", &amp; → &
+static void xml_entity_decode(char *s) {
+  char *r = s, *w = s;
+  while (*r) {
+    if (strncmp(r, "&lt;", 4) == 0)       { *w++ = '<'; r += 4; }
+    else if (strncmp(r, "&gt;", 4) == 0)  { *w++ = '>'; r += 4; }
+    else if (strncmp(r, "&quot;", 6) == 0) { *w++ = '"'; r += 6; }
+    else if (strncmp(r, "&amp;", 5) == 0)  { *w++ = '&'; r += 5; }
+    else if (strncmp(r, "&apos;", 6) == 0) { *w++ = '\''; r += 6; }
+    else { *w++ = *r++; }
+  }
+  *w = '\0';
+}
+
 // Query GetZoneGroupState and build coordinator-only speaker list.
 // Returns true if successful (out->count updated with coordinators).
 static bool resolve_coordinators(const char *any_speaker_ip, int port,
@@ -232,7 +246,13 @@ static bool resolve_coordinators(const char *any_speaker_ip, int port,
     return false;
   }
 
-  ESP_LOGD(TAG, "ZoneGroupState: %.500s", resp_buf);
+  // The ZoneGroupState XML is entity-encoded inside the SOAP response
+  // e.g. &lt;ZoneGroups&gt;&lt;ZoneGroup Coordinator=&quot;RINCON_xxx&quot;...
+  // Decode in-place so we can parse with normal string operations
+  xml_entity_decode(resp_buf);
+  buf.len = static_cast<int>(strlen(resp_buf));
+
+  ESP_LOGI(TAG, "ZoneGroupState decoded (%d bytes): %.300s", buf.len, resp_buf);
 
   // Parse ZoneGroup entries — each has a Coordinator="RINCON_xxx" attribute
   // Find each ZoneGroup and extract the coordinator's Location and ZoneName
@@ -398,19 +418,3 @@ int discovery_scan(DiscoveryResult *out, int timeout_ms) {
   }
 
   // Fallback: if zone group query fails, use SSDP result with device name
-  ESP_LOGW(TAG, "Zone group query failed — falling back to SSDP result");
-  auto &speaker = out->speakers[0];
-  strncpy(speaker.ip, first_ip, sizeof(speaker.ip) - 1);
-  speaker.port = first_port;
-
-  char fallback_url[256];
-  snprintf(fallback_url, sizeof(fallback_url), "http://%s:%d/xml/device_description.xml",
-           first_ip, first_port);
-  if (!fetch_speaker_name(fallback_url, speaker.name, sizeof(speaker.name))) {
-    snprintf(speaker.name, sizeof(speaker.name), "Sonos (%s)", first_ip);
-  }
-
-  out->count = 1;
-  ESP_LOGI(TAG, "Fallback: %s at %s:%d", speaker.name, speaker.ip, speaker.port);
-  return out->count;
-}
