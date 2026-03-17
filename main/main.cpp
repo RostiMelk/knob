@@ -77,6 +77,21 @@ static void on_timer_fired(void *, esp_event_base_t, int32_t, void *data) {
   haptic_buzz();
 }
 
+static void resolve_speaker_name_task(void *) {
+  // Runs on its own task — HTTP calls need ~4KB stack, too much for event loop
+  char name[64] = {};
+  if (discovery_get_speaker_name(CONFIG_RADIO_SONOS_SPEAKER_IP, 1400,
+                                  name, sizeof(name)) && name[0]) {
+    ESP_LOGI(TAG, "Speaker name: %s", name);
+    settings_set_speaker_name(name);
+    ui_set_speaker_name(name);
+  } else {
+    ESP_LOGI(TAG, "Could not resolve speaker name, using IP");
+    ui_set_speaker_name(CONFIG_RADIO_SONOS_SPEAKER_IP);
+  }
+  vTaskDelete(nullptr);
+}
+
 static void discover_and_connect_task(void *) {
   ui_show_scanning();
 
@@ -134,19 +149,12 @@ static void on_wifi_connected(void *, esp_event_base_t, int32_t, void *) {
     // Use .env-configured speaker IP directly (skip discovery)
     ESP_LOGI(TAG, "Using configured speaker: %s", CONFIG_RADIO_SONOS_SPEAKER_IP);
     sonos_set_speaker(CONFIG_RADIO_SONOS_SPEAKER_IP);
+    ui_set_speaker_name(CONFIG_RADIO_SONOS_SPEAKER_IP); // Show IP immediately
     sonos_start();
 
-    // Resolve speaker name from device description
-    char speaker_name[64] = {};
-    if (discovery_get_speaker_name(CONFIG_RADIO_SONOS_SPEAKER_IP, 1400,
-                                    speaker_name, sizeof(speaker_name)) &&
-        speaker_name[0]) {
-      ESP_LOGI(TAG, "Speaker name: %s", speaker_name);
-    } else {
-      strncpy(speaker_name, CONFIG_RADIO_SONOS_SPEAKER_IP, sizeof(speaker_name) - 1);
-    }
-    settings_set_speaker_name(speaker_name);
-    ui_set_speaker_name(speaker_name);
+    // Resolve speaker name in background (HTTP needs its own task stack)
+    xTaskCreatePinnedToCore(resolve_speaker_name_task, "spk_name", 6144,
+                            nullptr, NET_TASK_PRIO, nullptr, NET_TASK_CORE);
   } else {
     xTaskCreatePinnedToCore(discover_and_connect_task, "discover", 10240,
                             nullptr, NET_TASK_PRIO, nullptr, NET_TASK_CORE);
