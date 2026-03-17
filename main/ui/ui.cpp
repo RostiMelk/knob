@@ -132,7 +132,7 @@ static constexpr const char *BG_DIR = "A:/spiffs/bg/";
 static char s_logo_path[128];
 static char s_bg_path[128];
 
-static void set_logo(int index) {
+static void set_logo(int index, bool logo_only = false) {
   if (index < 0 || index >= STATION_COUNT)
     return;
 
@@ -147,13 +147,16 @@ static void set_logo(int index) {
   lv_image_set_src(s_img_logo, s_logo_path);
   int64_t t1 = esp_timer_get_time();
 
-  snprintf(s_bg_path, sizeof(s_bg_path), "%s%.*s_bg.bin", BG_DIR,
-           static_cast<int>(base_len), logo_file);
-  lv_image_set_src(s_bg_img, s_bg_path);
+  if (!logo_only) {
+    snprintf(s_bg_path, sizeof(s_bg_path), "%s%.*s_bg.bin", BG_DIR,
+             static_cast<int>(base_len), logo_file);
+    lv_image_set_src(s_bg_img, s_bg_path);
+  }
   int64_t t2 = esp_timer_get_time();
 
-  ESP_LOGI("PERF", "set_logo[%d]: logo=%lld us  bg=%lld us  total=%lld us",
-           index, (long long)(t1 - t0), (long long)(t2 - t1),
+  ESP_LOGI("PERF", "set_logo[%d%s]: logo=%lld us  bg=%lld us  total=%lld us",
+           index, logo_only ? " (logo only)" : "",
+           (long long)(t1 - t0), (long long)(t2 - t1),
            (long long)(t2 - t0));
 }
 
@@ -232,7 +235,7 @@ static void on_vol_hide(lv_timer_t *) {
 // ─── Browse rotation callback (deferred image load) ────────────────────────────────
 
 static void on_browse_rotate_fade_done(lv_anim_t *) {
-  set_logo(s_browse_index);
+  set_logo(s_browse_index, true); // Skip 259KB bg during browse — swap on confirm
   anim_fade(s_logo_container, anim_opa_cb, LV_OPA_TRANSP, LV_OPA_70,
             ANIM_QUICK_MS);
 }
@@ -586,7 +589,7 @@ static void home_page_build(lv_obj_t *parent) {
   s_bg_img = lv_image_create(parent);
   lv_obj_set_size(s_bg_img, LCD_H_RES, LCD_V_RES);
   lv_obj_align(s_bg_img, LV_ALIGN_CENTER, 0, 0);
-  lv_image_set_inner_align(s_bg_img, LV_IMAGE_ALIGN_STRETCH);
+  lv_image_set_inner_align(s_bg_img, LV_IMAGE_ALIGN_CENTER);
   lv_obj_set_style_image_opa(s_bg_img, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_remove_flag(s_bg_img, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_remove_flag(s_bg_img, LV_OBJ_FLAG_SCROLLABLE);
@@ -638,7 +641,7 @@ static void home_page_build(lv_obj_t *parent) {
 
   s_img_logo = lv_image_create(s_logo_container);
   lv_obj_set_size(s_img_logo, 100, 100);
-  lv_image_set_inner_align(s_img_logo, LV_IMAGE_ALIGN_STRETCH);
+  lv_image_set_inner_align(s_img_logo, LV_IMAGE_ALIGN_CENTER);
   lv_obj_set_pos(s_img_logo, 0, 0);
   set_logo(0);
 
