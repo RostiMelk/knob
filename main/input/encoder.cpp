@@ -63,13 +63,13 @@ static void on_poll(void *) {
 
   if (cw) {
     int32_t steps = 1;
-    ESP_LOGI(TAG, "step: CW (+1)");
+    ESP_LOGD(TAG, "step: CW (+1)");
     esp_event_post(APP_EVENT, APP_EVENT_ENCODER_ROTATE, &steps, sizeof(steps),
                    0);
   }
   if (ccw) {
     int32_t steps = -1;
-    ESP_LOGI(TAG, "step: CCW (-1)");
+    ESP_LOGD(TAG, "step: CCW (-1)");
     esp_event_post(APP_EVENT, APP_EVENT_ENCODER_ROTATE, &steps, sizeof(steps),
                    0);
   }

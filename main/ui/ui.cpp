@@ -39,9 +39,9 @@ enum class Mode { Volume, Browse, Voice };
 
 static constexpr int BROWSE_TIMEOUT_MS = 7000;
 static constexpr int VOL_DISPLAY_MS = 1500;
-static constexpr int ANIM_FADE_MS = 0;      // DIAGNOSTIC: was 280
-static constexpr int ANIM_QUICK_MS = 0;     // DIAGNOSTIC: was 120
-static constexpr int ANIM_ARC_FADE_MS = 0;  // DIAGNOSTIC: was 600
+static constexpr int ANIM_FADE_MS = 200;
+static constexpr int ANIM_QUICK_MS = 100;
+static constexpr int ANIM_ARC_FADE_MS = 400;
 
 // ─── Palette ────────────────────────────────────────────────────────────────────────────
 
@@ -444,33 +444,6 @@ static void exit_browse() {
     anim_fade(s_lbl_subtitle, anim_opa_cb, LV_OPA_TRANSP, LV_OPA_COVER,
               ANIM_QUICK_MS);
   } else {
-    // Initialize memory-mapped image assets from flash
-    ESP_LOGI(TAG, "Initializing mmap assets (max_files=%d, checksum=0x%x)...",
-             MMAP_ASSETS_FILES, MMAP_ASSETS_CHECKSUM);
-    const mmap_assets_config_t mmap_cfg = {
-        .partition_label = "assets",
-        .max_files = MMAP_ASSETS_FILES,
-        .checksum = MMAP_ASSETS_CHECKSUM,
-        .flags = {
-            .mmap_enable = true,
-            .app_bin_check = false, // Don't check app binary — just validate checksum
-        },
-    };
-    esp_err_t mmap_err = mmap_assets_new(&mmap_cfg, &s_mmap_handle);
-    if (mmap_err == ESP_OK) {
-      int count = mmap_assets_get_stored_files(s_mmap_handle);
-      ESP_LOGI(TAG, "Mapped %d image assets from flash", count);
-      for (int i = 0; i < count && i < 5; i++) {
-        ESP_LOGI(TAG, "  [%d] %s (%d bytes)", i,
-                 mmap_assets_get_name(s_mmap_handle, i),
-                 mmap_assets_get_size(s_mmap_handle, i));
-      }
-      build_asset_lookup();
-    } else {
-      ESP_LOGE(TAG, "Failed to map image assets: %s (err=%d)", esp_err_to_name(mmap_err), mmap_err);
-      ESP_LOGE(TAG, "Images will not be displayed. Try: idf.py fullclean && idf.py build");
-    }
-
     show_idle_ui(true);
   }
 
@@ -934,6 +907,28 @@ void ui_init() {
     lv_timer_pause(s_tap_delay_timer);
 
     voice_ui_build(s_screen);
+
+    // Initialize memory-mapped image assets from flash
+    ESP_LOGI(TAG, "Initializing mmap assets (max_files=%d, checksum=0x%x)...",
+             MMAP_ASSETS_FILES, MMAP_ASSETS_CHECKSUM);
+    const mmap_assets_config_t mmap_cfg = {
+        .partition_label = "assets",
+        .max_files = MMAP_ASSETS_FILES,
+        .checksum = MMAP_ASSETS_CHECKSUM,
+        .flags = {
+            .mmap_enable = true,
+            .app_bin_check = false,
+        },
+    };
+    esp_err_t mmap_err = mmap_assets_new(&mmap_cfg, &s_mmap_handle);
+    if (mmap_err == ESP_OK) {
+      int count = mmap_assets_get_stored_files(s_mmap_handle);
+      ESP_LOGI(TAG, "Mapped %d image assets from flash", count);
+      build_asset_lookup();
+    } else {
+      ESP_LOGE(TAG, "mmap_assets init failed: %s (err=%d)",
+               esp_err_to_name(mmap_err), mmap_err);
+    }
 
     show_idle_ui(true);
 
