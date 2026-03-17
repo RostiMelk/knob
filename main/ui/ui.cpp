@@ -43,6 +43,10 @@ static constexpr int ANIM_ARC_FADE_MS = 400;
 static constexpr int ANIM_BG_FADE_MS = 250;
 static constexpr int ANIM_BG_BROWSE_MS = 250;
 
+static constexpr uint8_t BACKLIGHT_NORMAL = 80;
+static constexpr uint8_t BACKLIGHT_DIM = 8;
+static constexpr int BACKLIGHT_FADE_STEP_MS = 30;
+
 // ─── Palette
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -67,6 +71,7 @@ static int s_station_index;
 static int s_browse_index;
 static PlayState s_play_state = PlayState::Stopped;
 static bool s_was_playing;
+static bool s_idle_active = false;
 
 // ─── Widgets
 // ────────────────────────────────────────────────────────────────────────────
@@ -112,6 +117,11 @@ static lv_timer_t *s_browse_timer;
 // Touch press detection (manual long-press via timer)
 static lv_timer_t *s_press_timer;
 static bool s_press_was_long;
+
+// Backlight dimming
+static lv_timer_t *s_bl_timer;
+static uint8_t s_bl_current = BACKLIGHT_NORMAL;
+static uint8_t s_bl_target = BACKLIGHT_NORMAL;
 
 // Double-tap detection for voice mode
 static uint32_t s_last_tap_ms;
@@ -270,10 +280,37 @@ static void anim_fade(lv_obj_t *obj, lv_anim_exec_xcb_t exec_cb, int32_t start,
 // ─── Volume Arc
 // ─────────────────────────────────────────────────────────────────────
 
+// ─── Backlight Fade
+// ─────────────────────────────────────────────────────────────────────
+
+static void on_backlight_step(lv_timer_t *) {
+  if (s_bl_current == s_bl_target) {
+    lv_timer_pause(s_bl_timer);
+    return;
+  }
+  if (s_bl_current < s_bl_target)
+    s_bl_current = std::min<uint8_t>(s_bl_current + 3, s_bl_target);
+  else
+    s_bl_current = (s_bl_current > s_bl_target + 3)
+                       ? static_cast<uint8_t>(s_bl_current - 3)
+                       : s_bl_target;
+  display_set_backlight(s_bl_current);
+}
+
+static void backlight_fade_to(uint8_t target) {
+  s_bl_target = target;
+  if (s_bl_current == target)
+    return;
+  lv_timer_reset(s_bl_timer);
+  lv_timer_resume(s_bl_timer);
+}
+
 static void on_vol_hide(lv_timer_t *) {
   anim_fade(s_vol_arc, anim_arc_ind_opa_cb, LV_OPA_COVER, LV_OPA_30,
             ANIM_ARC_FADE_MS);
   lv_timer_pause(s_vol_hide_timer);
+  if (s_idle_active)
+    backlight_fade_to(BACKLIGHT_DIM);
 }
 
 // ─── Browse rotation callback (deferred image load)
@@ -304,14 +341,14 @@ static bool home_should_idle() {
   return s_play_state == PlayState::Stopped && s_mode == Mode::Volume;
 }
 
-static bool s_idle_active = false;
-
 static void show_idle_ui(bool idle) {
   if (!pages_is_home())
     return;
   if (idle == s_idle_active)
     return;
   s_idle_active = idle;
+
+  backlight_fade_to(idle ? BACKLIGHT_DIM : BACKLIGHT_NORMAL);
 
   lv_anim_delete(s_lbl_clock, anim_opa_cb);
   lv_anim_delete(s_logo_container, anim_opa_cb);
@@ -378,6 +415,7 @@ static void show_idle_ui(bool idle) {
 }
 
 static void show_volume(int level) {
+  backlight_fade_to(BACKLIGHT_NORMAL);
   lv_anim_delete(s_vol_arc, anim_arc_ind_opa_cb);
   lv_obj_set_style_arc_opa(s_vol_arc, LV_OPA_COVER, LV_PART_INDICATOR);
   lv_arc_set_value(s_vol_arc, level);
@@ -942,6 +980,10 @@ void ui_init() {
     lv_timer_pause(s_browse_timer);
 
     s_clock_timer = lv_timer_create(on_clock_tick, 30000, nullptr);
+
+    s_bl_timer =
+        lv_timer_create(on_backlight_step, BACKLIGHT_FADE_STEP_MS, nullptr);
+    lv_timer_pause(s_bl_timer);
 
     s_press_timer = lv_timer_create(on_press_timer, 500, nullptr);
     lv_timer_pause(s_press_timer);

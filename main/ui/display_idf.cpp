@@ -249,7 +249,7 @@ static void init_backlight() {
   ESP_ERROR_CHECK(ledc_channel_config(&ch_cfg));
 }
 
-static void set_backlight(uint8_t percent) {
+void display_set_backlight(uint8_t percent) {
   uint32_t duty = (1023 * percent) / 100;
   ledc_set_duty(LEDC_LOW_SPEED_MODE,
                 static_cast<ledc_channel_t>(LCD_BL_LEDC_CH), duty);
@@ -313,7 +313,7 @@ static void init_lcd() {
   ESP_ERROR_CHECK(esp_lcd_panel_mirror(s_panel, true, true));
   ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(s_panel, true));
 
-  set_backlight(80);
+  display_set_backlight(80);
   ESP_LOGI(TAG, "LCD initialized (%dx%d)", LCD_H_RES, LCD_V_RES);
 }
 
