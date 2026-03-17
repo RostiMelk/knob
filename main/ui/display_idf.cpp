@@ -273,7 +273,7 @@ static void init_lcd() {
   bus_cfg.data1_io_num = PIN_LCD_SIO1;
   bus_cfg.data2_io_num = PIN_LCD_SIO2;
   bus_cfg.data3_io_num = PIN_LCD_SIO3;
-  bus_cfg.max_transfer_sz = LCD_H_RES * LCD_DRAW_ROWS * sizeof(uint16_t);
+  bus_cfg.max_transfer_sz = LCD_H_RES * LCD_DRAW_ROWS * 3; // RGB888: 3 bytes/pixel
   bus_cfg.flags = SPICOMMON_BUSFLAG_QUAD;
   ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &bus_cfg, SPI_DMA_CH_AUTO));
 
@@ -299,7 +299,7 @@ static void init_lcd() {
   esp_lcd_panel_dev_config_t panel_cfg = {};
   panel_cfg.reset_gpio_num = -1; // Already reset above via direct GPIO
   panel_cfg.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB;
-  panel_cfg.bits_per_pixel = 16;
+  panel_cfg.bits_per_pixel = 18; // RGB666: ST77916 sets COLMOD=0x66, LVGL renders RGB888
   panel_cfg.vendor_config = &vendor_cfg;
   ESP_ERROR_CHECK(
       esp_lcd_new_panel_st77916(s_panel_io, &panel_cfg, &s_panel));
@@ -360,11 +360,12 @@ void display_init(lv_display_t **disp, lv_indev_t **touch) {
       .io_handle = s_panel_io,
       .panel_handle = s_panel,
       .buffer_size =
-          static_cast<uint32_t>(LCD_H_RES * LCD_DRAW_ROWS * sizeof(uint16_t)),
+          static_cast<uint32_t>(LCD_H_RES * LCD_DRAW_ROWS * 3), // RGB888: 3 bytes/pixel
       .double_buffer = true,
       .hres = LCD_H_RES,
       .vres = LCD_V_RES,
       .monochrome = false,
+      .color_format = LV_COLOR_FORMAT_RGB888,
       .rotation =
           {
               .swap_xy = false,
@@ -376,7 +377,7 @@ void display_init(lv_display_t **disp, lv_indev_t **touch) {
               .buff_dma = true,
               .buff_spiram = false,
               .sw_rotate = false,
-              .swap_bytes = true,
+              .swap_bytes = false, // RGB888: no byte swapping needed
               .full_refresh = false,
               .direct_mode = false,
           },
@@ -389,7 +390,7 @@ void display_init(lv_display_t **disp, lv_indev_t **touch) {
   };
   *touch = lvgl_port_add_touch(&touch_port_cfg);
 
-  ESP_LOGI(TAG, "LVGL port initialized (swap_bytes=true)");
+  ESP_LOGI(TAG, "LVGL port initialized (RGB888, swap_bytes=false, %d rows)", LCD_DRAW_ROWS);
 }
 
 bool display_lock(int timeout_ms) { return lvgl_port_lock(timeout_ms); }
