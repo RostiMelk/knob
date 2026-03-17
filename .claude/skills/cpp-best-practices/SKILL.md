@@ -1,12 +1,13 @@
 ---
 name: cpp-best-practices
-description: Modern C++20 best practices for ESP32-S3 embedded development. Use when writing new code, refactoring, or reviewing for DRY violations, readability, and reusability.
+description: Modern C++20/23 best practices for ESP32-S3 embedded development. Use when writing new code, refactoring, or reviewing for DRY violations, readability, and reusability.
 ---
 
-# C++20 Best Practices for ESP32-S3
+# C++20/23 Best Practices for ESP32-S3
 
-This project uses C++20 on ESP-IDF v5.4 (GCC 13.2 Xtensa). No exceptions, no RTTI.
-These guidelines prioritize readability, DRY, and safe abstractions within embedded constraints.
+ESP-IDF v5.4 ships **GCC 14.2.0** defaulting to **`-std=gnu++23`**.
+Nearly all C++20 and most C++23 features are available.
+No exceptions (`-fno-exceptions`), no RTTI (`-fno-rtti`).
 
 ## 1. DRY — Don't Repeat Yourself
 
@@ -77,21 +78,25 @@ bool soap_request(const char *path, const char *action, const char *ns,
 
 This is already partially done — keep pushing toward fewer raw `snprintf` calls.
 
-## 2. Modern C++20 Features (Safe on ESP-IDF v5.4)
+## 2. C++ Feature Matrix (GCC 14.2 / gnu++23)
 
 ### Use freely
 
 | Feature | Use for | Example |
 |---------|---------|--------|
 | `constexpr` | Compile-time constants, lookup tables | `constexpr int LCD_H_RES = 360;` |
+| `consteval` | Force compile-time evaluation | `consteval uint32_t make_color(uint8_t r, uint8_t g, uint8_t b)` |
 | `std::string_view` | Non-owning string references | Function params instead of `const char*` when you need `.size()` |
-| `std::clamp` | Bounded values | `std::clamp(vol, VOLUME_MIN, VOLUME_MAX)` |
+| `std::span` | Bounds-safe buffer views | `void parse(std::span<const char> data)` instead of `(char* buf, size_t len)` |
 | `std::optional` | Nullable returns without pointers | `std::optional<int> parse_volume(const char* xml)` |
+| `std::expected` | Error handling without exceptions (C++23) | `std::expected<int, SonosError> get_volume()` |
 | `std::array` | Fixed-size arrays with bounds info | `std::array<Station, 12> stations` |
+| `std::clamp` | Bounded values | `std::clamp(vol, VOLUME_MIN, VOLUME_MAX)` |
 | Structured bindings | Unpacking structs/pairs | `auto [ip, port] = parse_endpoint(url);` |
+| Designated initializers | Readable struct init | `Config cfg = { .timeout = 5000, .retries = 3 };` |
+| Concepts | Template constraints | `template<EventPayload T> void post(const T& data)` |
 | `[[nodiscard]]` | Force callers to check return values | `[[nodiscard]] bool soap_fire(...)` |
 | `[[maybe_unused]]` | Suppress warnings on debug-only vars | `[[maybe_unused]] int64_t t0 = esp_timer_get_time();` |
-| Designated initializers | Readable struct init | `Config cfg = { .timeout = 5000, .retries = 3 };` |
 | `enum class` | Type-safe enums | `enum class PlayState : uint8_t { ... };` (already used) |
 | `using` aliases | Readable function types | `using PageChangedCb = void(*)(int, const char*);` |
 
@@ -100,26 +105,63 @@ This is already partially done — keep pushing toward fewer raw `snprintf` call
 | Feature | Caveat |
 |---------|--------|
 | Designated initializers | **Must be in declaration order** — GCC enforces strictly. Use field-by-field assignment for third-party structs (e.g., `esp_lvgl_port` types). |
-| `std::string_view` | Does NOT own the data. Never return a `string_view` to a local buffer. |
+| `std::string_view` | Does NOT own the data. Never return a `string_view` to a local buffer. Not null-terminated — copy to `char[]` before passing to C APIs. |
 | `std::optional` | Adds 1 byte overhead + alignment padding. Fine for return values, avoid in hot structs. |
-| Templates | Use sparingly — each instantiation adds flash. Prefer `constexpr` functions. |
+| `std::format` | Available in GCC 14 but may have issues with newlib (ESP-IDF's C library). Test before relying on it. `snprintf` is the safe fallback. |
+| Templates | Each instantiation adds flash. Prefer `constexpr` functions. Use `extern template` to limit bloat. |
 | `auto` | Use for iterators and complex types. Avoid for simple types where the type aids readability. |
+| `std::ranges` | Available but pulls in heavy headers. Verify binary size impact before using broadly. |
 
 ### Avoid
 
 | Feature | Why |
 |---------|-----|
-| `std::string` | Heap allocation for every instance. Use `char[]` or `std::string_view`. |
-| `std::map` / `std::unordered_map` | Heavy allocator use. Use sorted `std::array` + binary search. |
-| `std::vector` (in hot paths) | Heap allocation + reallocation. Pre-size or use `std::array`. |
+| `std::string` | Heap allocation for every instance. Use `std::string_view` or `char[]`. |
+| `std::map` / `std::unordered_map` | Heavy allocator use. Use sorted `std::array` + binary search for small N. |
 | `std::shared_ptr` | Atomic refcount overhead. Use `std::unique_ptr` or raw ownership. |
 | `dynamic_cast` | Requires RTTI (disabled). |
-| `std::iostream` | Massive binary size. Use `ESP_LOGx` macros. |
-| `std::format` | Not available in GCC 13.2 libstdc++ for Xtensa. Use `snprintf`. |
-| `std::ranges` | Partial support, pulls in heavy headers. Use raw loops. |
-| Exceptions | Disabled (`-fno-exceptions`). Use return codes or `std::optional`. |
+| `std::iostream` | +200KB binary size. Use `ESP_LOGx` macros. |
+| `std::function` | May heap-allocate. Use function pointers or templates. |
+| Exceptions | Disabled (`-fno-exceptions`). Use `std::expected` or return codes. |
+| Modules | Not supported by ESP-IDF build system. |
 
-## 3. RAII — Resource Acquisition Is Initialization
+## 3. Error Handling with std::expected (C++23)
+
+The best pattern for this project — replaces both error codes and exceptions:
+
+```cpp
+#include <expected>
+
+enum class SonosError : uint8_t {
+  Timeout, HttpError, ParseError, NotFound
+};
+
+template<typename T>
+using Result = std::expected<T, SonosError>;
+using VoidResult = std::expected<void, SonosError>;
+
+// Function returns either a value or an error
+Result<int> get_volume(const char *speaker_ip) {
+  // ... HTTP request ...
+  if (err != ESP_OK) return std::unexpected(SonosError::HttpError);
+  if (status != 200) return std::unexpected(SonosError::ParseError);
+  return parsed_volume;  // success
+}
+
+// Caller
+if (auto vol = get_volume(ip)) {
+  ESP_LOGI(TAG, "Volume: %d", *vol);
+} else {
+  ESP_LOGE(TAG, "Failed: %d", static_cast<int>(vol.error()));
+}
+
+// With value_or for defaults
+int vol = get_volume(ip).value_or(50);
+```
+
+**Note**: `std::expected` is header-only and should work with newlib, but verify on hardware before using in critical paths.
+
+## 4. RAII — Resource Acquisition Is Initialization
 
 ### Display Lock Guard
 
@@ -153,7 +195,6 @@ if (DisplayLock lock{50}) {
 ### HTTP Client RAII
 
 ```cpp
-// RAII wrapper for esp_http_client
 class HttpClient {
   esp_http_client_handle_t handle_;
 public:
@@ -170,7 +211,6 @@ public:
 ### PSRAM Buffer RAII
 
 ```cpp
-// Typed PSRAM allocation with automatic cleanup
 template<typename T>
 class PsramBuffer {
   T* ptr_;
@@ -189,12 +229,30 @@ public:
 };
 ```
 
-## 4. Strong Types
+## 5. std::span for Buffer Safety
+
+Replace raw `(char* buf, size_t len)` pairs with `std::span`:
+
+```cpp
+// Before: easy to pass wrong length
+bool xml_extract(const char *xml, const char *tag, char *out, size_t out_len);
+
+// After: bounds carried with the buffer
+bool xml_extract(std::string_view xml, std::string_view tag, std::span<char> out);
+
+// Works with any contiguous container:
+char buf[256];
+xml_extract(response, "CurrentVolume", std::span{buf});
+
+std::array<char, 64> arr;
+xml_extract(response, "CurrentVolume", arr);  // implicit conversion
+```
+
+## 6. Strong Types
 
 Avoid "primitive obsession" — raw `int` for volume, station index, and pixel coordinates are easy to mix up.
 
 ```cpp
-// Lightweight strong type (zero overhead with constexpr)
 struct Volume {
   int value;
   constexpr Volume clamp() const {
@@ -216,28 +274,23 @@ void sonos_play_station(StationIndex idx);
 
 Apply selectively — strong types for API boundaries, raw types for internal math.
 
-## 5. Readability Patterns
+## 7. Readability Patterns
 
 ### Named Constants Over Magic Numbers
 
 ```cpp
 // Before
 lv_obj_set_style_shadow_width(container, 20, LV_PART_MAIN);
-lv_obj_set_style_shadow_spread(container, 2, LV_PART_MAIN);
 lv_obj_align(container, LV_ALIGN_CENTER, 0, -30);
 
 // After
 constexpr int LOGO_SHADOW_WIDTH = 20;
-constexpr int LOGO_SHADOW_SPREAD = 2;
 constexpr int LOGO_Y_OFFSET = -30;
 ```
 
 ### Builder-Style Widget Setup
 
-For complex LVGL widget initialization, group related properties:
-
 ```cpp
-// Group by concern, not by API call order
 static lv_obj_t* create_label(lv_obj_t* parent, const lv_font_t* font,
                                lv_color_t color, lv_align_t align,
                                int x_ofs = 0, int y_ofs = 0) {
@@ -248,7 +301,7 @@ static lv_obj_t* create_label(lv_obj_t* parent, const lv_font_t* font,
   return lbl;
 }
 
-// Usage: one line instead of four
+// One line instead of four:
 s_lbl_station = create_label(parent, &geist_medium_28, theme::text,
                               LV_ALIGN_CENTER, 0, 68);
 ```
@@ -260,9 +313,8 @@ s_lbl_station = create_label(parent, &geist_medium_28, theme::text,
 void ui_set_volume(int level) {
   if (display_lock(50)) {
     s_volume = level;
-    if (pages_is_home() && s_vol_arc) {
+    if (pages_is_home() && s_vol_arc)
       lv_arc_set_value(s_vol_arc, level);
-    }
     display_unlock();
   }
 }
@@ -271,19 +323,18 @@ void ui_set_volume(int level) {
 void ui_set_volume(int level) {
   DisplayLock lock{50};
   if (!lock) return;
-
   s_volume = level;
   if (pages_is_home() && s_vol_arc)
     lv_arc_set_value(s_vol_arc, level);
 }
 ```
 
-## 6. Memory Management
+## 8. Memory Management
 
 ### Stack vs Heap vs PSRAM
 
 | Size | Where | Example |
-|------|-------|---------|
+|------|-------|---------| 
 | < 4 KB | Stack | Local buffers, small structs |
 | 4–16 KB | Heap (internal SRAM) | Default `malloc` for small allocs |
 | > 16 KB | PSRAM | `heap_caps_malloc(size, MALLOC_CAP_SPIRAM)` |
@@ -298,8 +349,6 @@ void ui_set_volume(int level) {
 constexpr std::string_view PLAY_STATES[] = {
   "Playing", "Paused", "Stopped", "Loading...", ""
 };
-
-// Instead of switch/case returning string literals
 const char* text = PLAY_STATES[static_cast<int>(state)].data();
 ```
 
@@ -310,61 +359,51 @@ const char* text = PLAY_STATES[static_cast<int>(state)].data();
 - Prefer `snprintf` into fixed buffers over string concatenation
 - FreeRTOS queues copy data — keep queue items small (use indices, not full structs)
 
-## 7. Concurrency (FreeRTOS + C++)
+## 9. Concurrency (FreeRTOS + C++)
 
 ### Type-Safe Queue
 
 ```cpp
 template<typename T, size_t N>
 class Queue {
+  static_assert(std::is_trivially_copyable_v<T>,
+                "Queue items must be trivially copyable");
   QueueHandle_t handle_;
 public:
   Queue() : handle_(xQueueCreate(N, sizeof(T))) {}
   bool send(const T& item, TickType_t wait = pdMS_TO_TICKS(50)) {
     return xQueueSend(handle_, &item, wait) == pdTRUE;
   }
-  bool receive(T& item, TickType_t wait = portMAX_DELAY) {
-    return xQueueReceive(handle_, &item, wait) == pdTRUE;
+  std::optional<T> receive(TickType_t wait = portMAX_DELAY) {
+    T item;
+    if (xQueueReceive(handle_, &item, wait) == pdTRUE) return item;
+    return std::nullopt;
   }
   void reset() { xQueueReset(handle_); }
 };
 
 // Usage:
-Queue<Command, 8> cmd_queue;  // type-safe, size checked at compile time
-```
-
-### Task Pinning
-
-All UI work on Core 1 (matches LVGL task affinity).
-WiFi on Core 0 (ESP-IDF default).
-Never block the LVGL task with network I/O.
-
-## 8. Error Handling Without Exceptions
-
-```cpp
-// Option 1: std::optional for "might not have a value"
-std::optional<int> xml_extract_int(const char* xml, const char* tag) {
-  char buf[32];
-  if (!xml_extract(xml, tag, buf, sizeof(buf))) return std::nullopt;
-  return atoi(buf);
+Queue<Command, 8> cmd_queue;
+if (auto cmd = cmd_queue.receive(pdMS_TO_TICKS(200))) {
+  handle(*cmd);
 }
-
-// Option 2: ESP-IDF error codes for operations that can fail
-[[nodiscard]] esp_err_t wifi_connect(const char* ssid, const char* pass);
-
-// Option 3: bool + out parameter for simple cases
-bool soap_request(const char* path, ..., Response* out_resp);
 ```
 
-Always use `[[nodiscard]]` on functions where ignoring the return value is a bug.
+### Task Pinning Rules
 
-## 9. Code Organization Checklist
+- All UI/LVGL work on **Core 1** (matches LVGL task affinity)
+- WiFi on **Core 0** (ESP-IDF default)
+- Never block the LVGL task with network I/O
+
+## 10. Code Organization Checklist
 
 When writing new code or refactoring, check:
 
 - [ ] **Colors**: using `theme.h` constants, not local `#define COL_*`?
 - [ ] **Animations**: using shared `anim_fade()` / `anim_pulse()`, not raw `lv_anim_init` blocks?
 - [ ] **Display lock**: using RAII guard, not manual lock/unlock?
+- [ ] **Buffers**: using `std::span` for buffer params, not `(ptr, len)` pairs?
+- [ ] **Errors**: using `std::expected` or `std::optional`, not sentinel values?
 - [ ] **Magic numbers**: named constants for sizes, offsets, durations?
 - [ ] **String formatting**: `snprintf` into fixed buffer, not `std::string`?
 - [ ] **Error returns**: `[[nodiscard]]` on fallible functions?
