@@ -376,19 +376,41 @@ static void enter_browse() {
   lv_timer_resume(s_browse_timer);
 }
 
+// Called after fade-out completes during browse exit — swaps image while hidden
+static void on_exit_browse_fade_done(lv_anim_t *a) {
+  set_logo(s_station_index);
+  // Fade back in
+  anim_fade(s_logo_container, anim_opa_cb, LV_OPA_TRANSP, LV_OPA_COVER,
+            ANIM_FADE_MS);
+}
+
 static void exit_browse() {
   s_mode = Mode::Volume;
 
   lv_obj_set_style_text_color(s_lbl_station, COL_TEXT, LV_PART_MAIN);
 
   lv_label_set_text(s_lbl_station, STATIONS[s_station_index].name);
-  set_logo(s_station_index);
   update_subtitle();
 
-  if (s_was_playing) {
+  bool needs_image_swap = (s_browse_index != s_station_index);
+
+  if (needs_image_swap) {
+    // Fade out logo, swap image while hidden, fade back in
     lv_anim_delete(s_logo_container, anim_opa_cb);
-    anim_fade(s_logo_container, anim_opa_cb, LV_OPA_70, LV_OPA_COVER,
-              ANIM_FADE_MS);
+    anim_fade(s_logo_container, anim_opa_cb,
+              lv_obj_get_style_opa(s_logo_container, LV_PART_MAIN),
+              LV_OPA_TRANSP, ANIM_QUICK_MS, on_exit_browse_fade_done);
+  } else {
+    // Same station — just restore directly
+    set_logo(s_station_index);
+  }
+
+  if (s_was_playing) {
+    if (!needs_image_swap) {
+      lv_anim_delete(s_logo_container, anim_opa_cb);
+      anim_fade(s_logo_container, anim_opa_cb, LV_OPA_70, LV_OPA_COVER,
+                ANIM_FADE_MS);
+    }
 
     lv_anim_delete(s_lbl_subtitle, anim_opa_cb);
     lv_obj_set_style_opa(s_lbl_subtitle, LV_OPA_TRANSP, LV_PART_MAIN);

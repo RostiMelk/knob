@@ -100,3 +100,6 @@ CONFIG_LV_DRAW_BUF_ALIGN=64
 
 # Move read-only data to PSRAM — frees flash cache for code execution
 CONFIG_SPIRAM_RODATA=y
+
+# Increase system event queue — Sonos HTTP polling fires many events at boot
+CONFIG_ESP_SYSTEM_EVENT_TASK_QUEUE_SIZE=64
