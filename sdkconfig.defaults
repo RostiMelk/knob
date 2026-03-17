@@ -27,6 +27,10 @@ CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384
 CONFIG_FREERTOS_HZ=1000
 CONFIG_FREERTOS_TIMER_TASK_STACK_DEPTH=4096
 
+# System event task — default 2048 is too small when HTTP client
+# event handlers (Sonos SOAP) run on the system event loop
+CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096
+
 # WiFi — tuned buffer counts (RX_BA_WIN must be <= DYNAMIC_RX_BUFFER_NUM
 # and <= 2 * STATIC_RX_BUFFER_NUM)
 CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=10
