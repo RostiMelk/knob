@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 constexpr int DISCOVERY_MAX_SPEAKERS = 16;

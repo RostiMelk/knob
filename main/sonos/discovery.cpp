@@ -398,6 +398,43 @@ int discovery_scan(DiscoveryResult *out, int timeout_ms) {
 
     if (first_ip[0] == '\0') {
       strncpy(first_ip, ip, sizeof(first_ip) - 1);
+      first_port = port;
+      ESP_LOGI(TAG, "SSDP: found speaker at %s:%d — querying zone groups", ip, port);
+      break; // One speaker is enough to query zone state
+    }
+  }
+
+  close(sock);
+
+  if (first_ip[0] == '\0') {
+    ESP_LOGW(TAG, "No speakers found via SSDP");
+    return 0;
+  }
+
+  // Phase 2: Query GetZoneGroupState to find all coordinators
+  if (resolve_coordinators(first_ip, first_port, out)) {
+    ESP_LOGI(TAG, "Zone group resolution: %d coordinator(s) found", out->count);
+    return out->count;
+  }
+
+  // Fallback: if zone group query fails, use SSDP result with device name
+  ESP_LOGW(TAG, "Zone group query failed — falling back to SSDP result");
+  auto &speaker = out->speakers[0];
+  strncpy(speaker.ip, first_ip, sizeof(speaker.ip) - 1);
+  speaker.port = first_port;
+
+  char fallback_url[256];
+  snprintf(fallback_url, sizeof(fallback_url), "http://%s:%d/xml/device_description.xml",
+           first_ip, first_port);
+  if (!fetch_speaker_name(fallback_url, speaker.name, sizeof(speaker.name))) {
+    snprintf(speaker.name, sizeof(speaker.name), "Sonos (%s)", first_ip);
+  }
+
+  out->count = 1;
+  ESP_LOGI(TAG, "Fallback: %s at %s:%d", speaker.name, speaker.ip, speaker.port);
+  return out->count;
+}
+
 bool discovery_get_speaker_name(const char *ip, int port, char *name, size_t name_len) {
   char url[128];
   snprintf(url, sizeof(url), "http://%s:%d/xml/device_description.xml", ip, port);
