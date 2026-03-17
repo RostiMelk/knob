@@ -5,6 +5,7 @@
 
 void settings_init();
 
+bool settings_mount_spiffs();
 bool settings_load_config_from_sd();
 
 int settings_get_volume();
@@ -26,3 +27,6 @@ void settings_set_wifi_ssid(const char *ssid);
 
 void settings_get_wifi_pass(char *buf, size_t len);
 void settings_set_wifi_pass(const char *pass);
+
+void settings_get_openai_api_key(char *buf, size_t len);
+void settings_set_openai_api_key(const char *key);

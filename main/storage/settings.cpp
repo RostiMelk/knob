@@ -1,6 +1,7 @@
 #include "settings.h"
 #include "app_config.h"
 
+#include "esp_spiffs.h"
 #include "driver/sdmmc_host.h"
 #include "esp_log.h"
 #include "esp_vfs_fat.h"
@@ -21,6 +22,7 @@ static constexpr const char *KEY_SPEAKER_IP = "speaker_ip";
 static constexpr const char *KEY_SPEAKER_NAME = "speaker_nm";
 static constexpr const char *KEY_WIFI_SSID = "wifi_ssid";
 static constexpr const char *KEY_WIFI_PASS = "wifi_pass";
+static constexpr const char *KEY_OPENAI_KEY = "openai_key";
 
 static nvs_handle_t s_nvs;
 
@@ -114,8 +116,38 @@ void settings_set_wifi_pass(const char *pass) {
   write_str(KEY_WIFI_PASS, pass);
 }
 
-// SPIFFS removed — images are now memory-mapped from flash (esp_mmap_assets).
-// See ui.cpp for mmap initialization.
+void settings_get_openai_api_key(char *buf, size_t len) {
+  const char *fallback = "";
+#ifdef CONFIG_RADIO_OPENAI_API_KEY
+  fallback = CONFIG_RADIO_OPENAI_API_KEY;
+#endif
+  read_str(KEY_OPENAI_KEY, buf, len, fallback);
+}
+
+void settings_set_openai_api_key(const char *key) {
+  write_str(KEY_OPENAI_KEY, key);
+}
+
+// ─── SPIFFS (embedded logos) ─────────────────────────────────────────────────
+
+bool settings_mount_spiffs() {
+  esp_vfs_spiffs_conf_t conf = {};
+  conf.base_path = "/spiffs";
+  conf.partition_label = "storage";
+  conf.max_files = 5;
+  conf.format_if_mount_failed = false;
+
+  esp_err_t ret = esp_vfs_spiffs_register(&conf);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "SPIFFS mount failed: %s", esp_err_to_name(ret));
+    return false;
+  }
+
+  size_t total = 0, used = 0;
+  esp_spiffs_info("storage", &total, &used);
+  ESP_LOGI(TAG, "SPIFFS mounted: %zu/%zu bytes used", used, total);
+  return true;
+}
 
 // ─── SD Card Config File ────────────────────────────────────────────────────
 // Standard .env format: KEY=value, one per line. # comments.
@@ -190,6 +222,9 @@ static void apply_config_line(char *line) {
   } else if (strcmp(key, "STATION") == 0) {
     settings_set_station_index(atoi(val));
     ESP_LOGI(TAG, ".env: STATION=%s", val);
+  } else if (strcmp(key, "OPENAI_API_KEY") == 0) {
+    settings_set_openai_api_key(val);
+    ESP_LOGI(TAG, ".env: OPENAI_API_KEY=sk-***");
   } else {
     ESP_LOGW(TAG, "config: unknown key '%s'", key);
   }
@@ -197,7 +232,7 @@ static void apply_config_line(char *line) {
 
 bool settings_load_config_from_sd() {
   if (!mount_sd()) {
-    ESP_LOGI(TAG, "No SD card — logos loaded from flash (mmap)");
+    ESP_LOGI(TAG, "No SD card — logos will load from SPIFFS");
     return false;
   }
 

@@ -8,7 +8,9 @@
 #include "timer/timer.h"
 #include "ui/ui.h"
 #include "ui/ui_timer.h"
+#include "ui/ui_voice.h"
 #include "voice/voice_tools.h"
+#include "voice/voice_task.h"
 
 #include "esp_event.h"
 #include "esp_log.h"
@@ -75,6 +77,35 @@ static void on_timer_fired(void *, esp_event_base_t, int32_t, void *data) {
   auto *label = static_cast<const char *>(data);
   ESP_LOGI(TAG, "Timer fired: %s", label ? label : "(none)");
   haptic_buzz();
+}
+
+// ─── Voice Mode Events ──────────────────────────────────────────────────────
+
+static void on_voice_activate(void *, esp_event_base_t, int32_t, void *) {
+  ESP_LOGI(TAG, "Voice mode activated");
+  voice_task_start();
+}
+
+static void on_voice_deactivate(void *, esp_event_base_t, int32_t, void *) {
+  ESP_LOGI(TAG, "Voice mode deactivated");
+  voice_task_stop();
+}
+
+static void on_voice_state(void *, esp_event_base_t, int32_t, void *data) {
+  auto state = *static_cast<VoiceState *>(data);
+  if (state == VoiceState::Inactive) {
+    voice_ui_exit();
+  } else {
+    voice_ui_set_state(state);
+  }
+}
+
+static void on_voice_transcript(void *, esp_event_base_t, int32_t, void *data) {
+  auto *text = static_cast<const char *>(data);
+  // Determine if this is user or AI text based on current voice state
+  // (Thinking = user just spoke, Speaking = AI responding)
+  // For now, show all transcripts as AI text (non-dimmed)
+  voice_ui_set_transcript(text, false);
 }
 
 static void discover_and_connect_task(void *) {
@@ -202,6 +233,14 @@ static void register_events() {
                              on_timer_started, nullptr);
   esp_event_handler_register(APP_EVENT, APP_EVENT_TIMER_FIRED, on_timer_fired,
                              nullptr);
+  esp_event_handler_register(APP_EVENT, APP_EVENT_VOICE_ACTIVATE,
+                             on_voice_activate, nullptr);
+  esp_event_handler_register(APP_EVENT, APP_EVENT_VOICE_DEACTIVATE,
+                             on_voice_deactivate, nullptr);
+  esp_event_handler_register(APP_EVENT, APP_EVENT_VOICE_STATE,
+                             on_voice_state, nullptr);
+  esp_event_handler_register(APP_EVENT, APP_EVENT_VOICE_TRANSCRIPT,
+                             on_voice_transcript, nullptr);
 }
 
 static void start_timer_tick() {
@@ -217,6 +256,7 @@ extern "C" void app_main() {
 
   init_nvs();
   settings_init();
+  settings_mount_spiffs();
   settings_load_config_from_sd();
 
   s_volume = settings_get_volume();
@@ -231,6 +271,7 @@ extern "C" void app_main() {
   timer_init();
   ui_timer_init();
   voice_tools_init();
+  voice_task_init();
   start_timer_tick();
   wifi_manager_init();
 

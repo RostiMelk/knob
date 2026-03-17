@@ -14,5 +14,5 @@ dependencies:
   espressif/esp_lcd_st77916:
     version: "^2"
 
-  espressif/esp_mmap_assets:
-    version: "^1.4.0"
+  espressif/esp_websocket_client:
+    version: "^1"

@@ -39,7 +39,14 @@ CONFIG_LWIP_MAX_SOCKETS=8
 CONFIG_LWIP_SO_RCVBUF=y
 
 # HTTP client
-CONFIG_ESP_HTTP_CLIENT_ENABLE_HTTPS=n
+CONFIG_ESP_HTTP_CLIENT_ENABLE_HTTPS=y
+
+# WebSocket client (for OpenAI Realtime API)
+CONFIG_ESP_WEBSOCKET_CLIENT_ENABLE=y
+
+# TLS — use certificate bundle for WSS connections
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
 
 # Compiler — optimize for performance
 CONFIG_COMPILER_OPTIMIZATION_PERF=y
@@ -53,8 +60,9 @@ CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
 # Console via USB-UART bridge
 CONFIG_ESP_CONSOLE_UART_DEFAULT=y
 
-# LVGL filesystem — POSIX no longer needed (images are memory-mapped from flash).
-# Keep FS_POSIX disabled to save code size.
+# LVGL filesystem (POSIX)
+CONFIG_LV_USE_FS_POSIX=y
+CONFIG_LV_FS_POSIX_LETTER=65
 
 # LVGL memory: use C stdlib malloc so large allocations go to PSRAM
 # (Kconfig choice: must explicitly disable builtin to switch)
@@ -80,9 +88,3 @@ CONFIG_ESP_MAIN_TASK_AFFINITY_CPU1=y
 
 # Timezone — POSIX TZ string (default: Oslo CET/CEST)
 CONFIG_RADIO_TIMEZONE="CET-1CEST,M3.5.0,M10.5.0/3"
-
-# Draw buffer alignment — match ESP32-S3 cache line size for optimal DMA
-CONFIG_LV_DRAW_BUF_ALIGN=64
-
-# Move read-only data to PSRAM — frees flash cache for code execution
-CONFIG_SPIRAM_RODATA=y
