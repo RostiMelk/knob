@@ -8,7 +8,9 @@
 #include "timer/timer.h"
 #include "ui/ui.h"
 #include "ui/ui_timer.h"
+#include "ui/ui_voice.h"
 #include "voice/voice_tools.h"
+#include "voice/voice_task.h"
 
 #include "esp_event.h"
 #include "esp_log.h"
@@ -77,19 +79,33 @@ static void on_timer_fired(void *, esp_event_base_t, int32_t, void *data) {
   haptic_buzz();
 }
 
-static void resolve_speaker_name_task(void *) {
-  // Runs on its own task — HTTP calls need ~4KB stack, too much for event loop
-  char name[64] = {};
-  if (discovery_get_speaker_name(CONFIG_RADIO_SONOS_SPEAKER_IP, 1400,
-                                  name, sizeof(name)) && name[0]) {
-    ESP_LOGI(TAG, "Speaker name: %s", name);
-    settings_set_speaker_name(name);
-    ui_set_speaker_name(name);
+// ─── Voice Mode Events ──────────────────────────────────────────────────────
+
+static void on_voice_activate(void *, esp_event_base_t, int32_t, void *) {
+  ESP_LOGI(TAG, "Voice mode activated");
+  voice_task_start();
+}
+
+static void on_voice_deactivate(void *, esp_event_base_t, int32_t, void *) {
+  ESP_LOGI(TAG, "Voice mode deactivated");
+  voice_task_stop();
+}
+
+static void on_voice_state(void *, esp_event_base_t, int32_t, void *data) {
+  auto state = *static_cast<VoiceState *>(data);
+  if (state == VoiceState::Inactive) {
+    voice_ui_exit();
   } else {
-    ESP_LOGI(TAG, "Could not resolve speaker name, using IP");
-    ui_set_speaker_name(CONFIG_RADIO_SONOS_SPEAKER_IP);
+    voice_ui_set_state(state);
   }
-  vTaskDelete(nullptr);
+}
+
+static void on_voice_transcript(void *, esp_event_base_t, int32_t, void *data) {
+  auto *text = static_cast<const char *>(data);
+  // Determine if this is user or AI text based on current voice state
+  // (Thinking = user just spoke, Speaking = AI responding)
+  // For now, show all transcripts as AI text (non-dimmed)
+  voice_ui_set_transcript(text, false);
 }
 
 static void discover_and_connect_task(void *) {
@@ -149,12 +165,19 @@ static void on_wifi_connected(void *, esp_event_base_t, int32_t, void *) {
     // Use .env-configured speaker IP directly (skip discovery)
     ESP_LOGI(TAG, "Using configured speaker: %s", CONFIG_RADIO_SONOS_SPEAKER_IP);
     sonos_set_speaker(CONFIG_RADIO_SONOS_SPEAKER_IP);
-    ui_set_speaker_name(CONFIG_RADIO_SONOS_SPEAKER_IP); // Show IP immediately
     sonos_start();
 
-    // Resolve speaker name in background (HTTP needs its own task stack)
-    xTaskCreatePinnedToCore(resolve_speaker_name_task, "spk_name", 6144,
-                            nullptr, NET_TASK_PRIO, nullptr, NET_TASK_CORE);
+    // Resolve speaker name from device description
+    char speaker_name[64] = {};
+    if (discovery_get_speaker_name(CONFIG_RADIO_SONOS_SPEAKER_IP, 1400,
+                                    speaker_name, sizeof(speaker_name)) &&
+        speaker_name[0]) {
+      ESP_LOGI(TAG, "Speaker name: %s", speaker_name);
+    } else {
+      strncpy(speaker_name, CONFIG_RADIO_SONOS_SPEAKER_IP, sizeof(speaker_name) - 1);
+    }
+    settings_set_speaker_name(speaker_name);
+    ui_set_speaker_name(speaker_name);
   } else {
     xTaskCreatePinnedToCore(discover_and_connect_task, "discover", 10240,
                             nullptr, NET_TASK_PRIO, nullptr, NET_TASK_CORE);
@@ -210,6 +233,14 @@ static void register_events() {
                              on_timer_started, nullptr);
   esp_event_handler_register(APP_EVENT, APP_EVENT_TIMER_FIRED, on_timer_fired,
                              nullptr);
+  esp_event_handler_register(APP_EVENT, APP_EVENT_VOICE_ACTIVATE,
+                             on_voice_activate, nullptr);
+  esp_event_handler_register(APP_EVENT, APP_EVENT_VOICE_DEACTIVATE,
+                             on_voice_deactivate, nullptr);
+  esp_event_handler_register(APP_EVENT, APP_EVENT_VOICE_STATE,
+                             on_voice_state, nullptr);
+  esp_event_handler_register(APP_EVENT, APP_EVENT_VOICE_TRANSCRIPT,
+                             on_voice_transcript, nullptr);
 }
 
 static void start_timer_tick() {
@@ -225,6 +256,7 @@ extern "C" void app_main() {
 
   init_nvs();
   settings_init();
+  settings_mount_spiffs();
   settings_load_config_from_sd();
 
   s_volume = settings_get_volume();
@@ -239,6 +271,7 @@ extern "C" void app_main() {
   timer_init();
   ui_timer_init();
   voice_tools_init();
+  voice_task_init();
   start_timer_tick();
   wifi_manager_init();
 
