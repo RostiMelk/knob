@@ -101,31 +101,6 @@ else
   PREREQ_OK=false
 fi
 
-# Rust ESP toolchain
-if command -v rustup &>/dev/null && rustup toolchain list 2>/dev/null | grep -q 'esp'; then
-  ok "Rust ESP toolchain found"
-else
-  err "Rust ESP toolchain not found. Run: espup install"
-  err "See: https://github.com/esp-rs/espup"
-  PREREQ_OK=false
-fi
-
-# ldproxy
-if command -v ldproxy &>/dev/null; then
-  ok "ldproxy found"
-else
-  err "ldproxy not found. Run: cargo install ldproxy"
-  PREREQ_OK=false
-fi
-
-# espup (optional — warn only)
-if command -v espup &>/dev/null; then
-  ok "espup found"
-else
-  warn "espup not found (optional, but needed to update the ESP Rust toolchain)"
-  warn "Install: cargo install espup"
-fi
-
 if [ "$PREREQ_OK" = false ]; then
   err "Prerequisites missing. Fix the errors above and try again."
   exit 1
