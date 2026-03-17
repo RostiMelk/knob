@@ -356,38 +356,32 @@ void display_init(lv_display_t **disp, lv_indev_t **touch) {
   port_cfg.task_affinity = 1; // Pin LVGL to Core 1 (WiFi runs on Core 0)
   ESP_ERROR_CHECK(lvgl_port_init(&port_cfg));
 
-  const lvgl_port_display_cfg_t disp_cfg = {
-      .io_handle = s_panel_io,
-      .panel_handle = s_panel,
-      .buffer_size =
-          static_cast<uint32_t>(LCD_H_RES * LCD_DRAW_ROWS * 3), // RGB888: 3 bytes/pixel
-      .double_buffer = true,
-      .hres = LCD_H_RES,
-      .vres = LCD_V_RES,
-      .monochrome = false,
-      .rotation =
-          {
-              .swap_xy = false,
-              .mirror_x = true,
-              .mirror_y = true,
-          },
-      .color_format = LV_COLOR_FORMAT_RGB888,
-      .flags =
-          {
-              .buff_dma = true,
-              .buff_spiram = false,
-              .sw_rotate = false,
-              .swap_bytes = false, // RGB888: no byte swapping needed
-              .full_refresh = false,
-              .direct_mode = false,
-          },
-  };
+  // Use field-by-field assignment to avoid C++20 designated initializer
+  // ordering issues with esp_lvgl_port struct layout
+  lvgl_port_display_cfg_t disp_cfg = {};
+  disp_cfg.io_handle = s_panel_io;
+  disp_cfg.panel_handle = s_panel;
+  disp_cfg.buffer_size = static_cast<uint32_t>(LCD_H_RES * LCD_DRAW_ROWS * 3);
+  disp_cfg.double_buffer = true;
+  disp_cfg.hres = LCD_H_RES;
+  disp_cfg.vres = LCD_V_RES;
+  disp_cfg.monochrome = false;
+  disp_cfg.color_format = LV_COLOR_FORMAT_RGB888;
+  disp_cfg.rotation.swap_xy = false;
+  disp_cfg.rotation.mirror_x = true;
+  disp_cfg.rotation.mirror_y = true;
+  disp_cfg.flags.buff_dma = true;
+  disp_cfg.flags.buff_spiram = false;
+  disp_cfg.flags.sw_rotate = false;
+  disp_cfg.flags.swap_bytes = false;
+  disp_cfg.flags.full_refresh = false;
+  disp_cfg.flags.direct_mode = false;
+
   *disp = lvgl_port_add_disp(&disp_cfg);
 
-  const lvgl_port_touch_cfg_t touch_port_cfg = {
-      .disp = *disp,
-      .handle = s_touch,
-  };
+  lvgl_port_touch_cfg_t touch_port_cfg = {};
+  touch_port_cfg.disp = *disp;
+  touch_port_cfg.handle = s_touch;
   *touch = lvgl_port_add_touch(&touch_port_cfg);
 
   ESP_LOGI(TAG, "LVGL port initialized (RGB888, swap_bytes=false, %d rows)", LCD_DRAW_ROWS);
