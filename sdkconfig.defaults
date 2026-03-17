@@ -80,3 +80,9 @@ CONFIG_ESP_MAIN_TASK_AFFINITY_CPU1=y
 
 # Timezone — POSIX TZ string (default: Oslo CET/CEST)
 CONFIG_RADIO_TIMEZONE="CET-1CEST,M3.5.0,M10.5.0/3"
+
+# Draw buffer alignment — match ESP32-S3 cache line size for optimal DMA
+CONFIG_LV_DRAW_BUF_ALIGN=64
+
+# Move read-only data to PSRAM — frees flash cache for code execution
+CONFIG_SPIRAM_RODATA=y
