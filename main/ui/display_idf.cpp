@@ -72,11 +72,15 @@ static const st77916_lcd_init_cmd_t st77916_init_cmds[] = {
     {0xF0, (uint8_t[]){0x00}, 1, 0},
     // Gamma positive
     {0xF0, (uint8_t[]){0x02}, 1, 0},
-    {0xE0, (uint8_t[]){0xF0, 0x0A, 0x10, 0x09, 0x09, 0x36, 0x35, 0x33,
-                       0x4A, 0x29, 0x15, 0x15, 0x2E, 0x34}, 14, 0},
+    {0xE0,
+     (uint8_t[]){0xF0, 0x0A, 0x10, 0x09, 0x09, 0x36, 0x35, 0x33, 0x4A, 0x29,
+                 0x15, 0x15, 0x2E, 0x34},
+     14, 0},
     // Gamma negative
-    {0xE1, (uint8_t[]){0xF0, 0x0A, 0x0F, 0x08, 0x08, 0x05, 0x34, 0x33,
-                       0x4A, 0x39, 0x15, 0x15, 0x2D, 0x33}, 14, 0},
+    {0xE1,
+     (uint8_t[]){0xF0, 0x0A, 0x0F, 0x08, 0x08, 0x05, 0x34, 0x33, 0x4A, 0x39,
+                 0x15, 0x15, 0x2D, 0x33},
+     14, 0},
     // Gate/source timing
     {0xF0, (uint8_t[]){0x10}, 1, 0},
     {0xF3, (uint8_t[]){0x10}, 1, 0},
@@ -273,7 +277,8 @@ static void init_lcd() {
   bus_cfg.data1_io_num = PIN_LCD_SIO1;
   bus_cfg.data2_io_num = PIN_LCD_SIO2;
   bus_cfg.data3_io_num = PIN_LCD_SIO3;
-  bus_cfg.max_transfer_sz = LCD_H_RES * LCD_DRAW_ROWS * 2; // RGB565: 2 bytes/pixel
+  bus_cfg.max_transfer_sz =
+      LCD_H_RES * LCD_DRAW_ROWS * 2; // RGB565: 2 bytes/pixel
   bus_cfg.flags = SPICOMMON_BUSFLAG_QUAD;
   ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &bus_cfg, SPI_DMA_CH_AUTO));
 
@@ -283,8 +288,8 @@ static void init_lcd() {
   io_cfg.dc_gpio_num = -1; // QSPI: no DC pin
   io_cfg.spi_mode = 0;
   io_cfg.pclk_hz = 50 * 1000 * 1000; // ST77916 max QSPI is 50MHz
-  io_cfg.trans_queue_depth = 10;
-  io_cfg.lcd_cmd_bits = 32;  // QSPI: 32-bit command (opcode + cmd + dummy)
+  io_cfg.trans_queue_depth = 3;
+  io_cfg.lcd_cmd_bits = 32; // QSPI: 32-bit command (opcode + cmd + dummy)
   io_cfg.lcd_param_bits = 8;
   io_cfg.flags.quad_mode = true;
   ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi(SPI2_HOST, &io_cfg, &s_panel_io));
@@ -301,8 +306,7 @@ static void init_lcd() {
   panel_cfg.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB;
   panel_cfg.bits_per_pixel = 16; // RGB565
   panel_cfg.vendor_config = &vendor_cfg;
-  ESP_ERROR_CHECK(
-      esp_lcd_new_panel_st77916(s_panel_io, &panel_cfg, &s_panel));
+  ESP_ERROR_CHECK(esp_lcd_new_panel_st77916(s_panel_io, &panel_cfg, &s_panel));
 
   ESP_ERROR_CHECK(esp_lcd_panel_reset(s_panel));
   ESP_ERROR_CHECK(esp_lcd_panel_init(s_panel));
@@ -372,18 +376,25 @@ void display_init(lv_display_t **disp, lv_indev_t **touch) {
   disp_cfg.flags.buff_dma = true;
   disp_cfg.flags.buff_spiram = false;
   disp_cfg.flags.sw_rotate = false;
-  disp_cfg.flags.swap_bytes = true;
+  disp_cfg.flags.swap_bytes = false;
   disp_cfg.flags.full_refresh = false;
   disp_cfg.flags.direct_mode = false;
 
   *disp = lvgl_port_add_disp(&disp_cfg);
+
+  // Render natively in byte-swapped RGB565 so the flush callback skips the
+  // expensive software swap (lv_draw_sw_rgb565_swap on ~500KB/frame).
+  // The ST77916 expects big-endian RGB565; ESP32-S3 is little-endian.
+  // Instead of swapping after render, we tell LVGL to render swapped.
+  lv_display_set_color_format(*disp, LV_COLOR_FORMAT_RGB565_SWAPPED);
 
   lvgl_port_touch_cfg_t touch_port_cfg = {};
   touch_port_cfg.disp = *disp;
   touch_port_cfg.handle = s_touch;
   *touch = lvgl_port_add_touch(&touch_port_cfg);
 
-  ESP_LOGI(TAG, "LVGL port initialized (RGB565, swap_bytes=true, %d rows)", LCD_DRAW_ROWS);
+  ESP_LOGI(TAG, "LVGL port initialized (RGB565_SWAPPED native, %d rows)",
+           LCD_DRAW_ROWS);
 }
 
 bool display_lock(int timeout_ms) { return lvgl_port_lock(timeout_ms); }

@@ -6,16 +6,17 @@
 #include "sonos/sonos.h"
 #include "storage/settings.h"
 #include "timer/timer.h"
+
 #include "ui/ui.h"
 #include "ui/ui_timer.h"
 #include "ui/ui_voice.h"
-#include "voice/voice_tools.h"
 #include "voice/voice_task.h"
+#include "voice/voice_tools.h"
 
 #include "esp_event.h"
 #include "esp_log.h"
-#include "esp_timer.h"
 #include "esp_netif_sntp.h"
+#include "esp_timer.h"
 #include "nvs_flash.h"
 
 #include "freertos/FreeRTOS.h"
@@ -163,18 +164,20 @@ static void on_wifi_connected(void *, esp_event_base_t, int32_t, void *) {
   } else if (strlen(CONFIG_RADIO_SONOS_SPEAKER_IP) > 0 &&
              strcmp(CONFIG_RADIO_SONOS_SPEAKER_IP, "192.168.1.100") != 0) {
     // Use .env-configured speaker IP directly (skip discovery)
-    ESP_LOGI(TAG, "Using configured speaker: %s", CONFIG_RADIO_SONOS_SPEAKER_IP);
+    ESP_LOGI(TAG, "Using configured speaker: %s",
+             CONFIG_RADIO_SONOS_SPEAKER_IP);
     sonos_set_speaker(CONFIG_RADIO_SONOS_SPEAKER_IP);
     sonos_start();
 
     // Resolve speaker name from device description
     char speaker_name[64] = {};
     if (discovery_get_speaker_name(CONFIG_RADIO_SONOS_SPEAKER_IP, 1400,
-                                    speaker_name, sizeof(speaker_name)) &&
+                                   speaker_name, sizeof(speaker_name)) &&
         speaker_name[0]) {
       ESP_LOGI(TAG, "Speaker name: %s", speaker_name);
     } else {
-      strncpy(speaker_name, CONFIG_RADIO_SONOS_SPEAKER_IP, sizeof(speaker_name) - 1);
+      strncpy(speaker_name, CONFIG_RADIO_SONOS_SPEAKER_IP,
+              sizeof(speaker_name) - 1);
     }
     settings_set_speaker_name(speaker_name);
     ui_set_speaker_name(speaker_name);
@@ -237,8 +240,8 @@ static void register_events() {
                              on_voice_activate, nullptr);
   esp_event_handler_register(APP_EVENT, APP_EVENT_VOICE_DEACTIVATE,
                              on_voice_deactivate, nullptr);
-  esp_event_handler_register(APP_EVENT, APP_EVENT_VOICE_STATE,
-                             on_voice_state, nullptr);
+  esp_event_handler_register(APP_EVENT, APP_EVENT_VOICE_STATE, on_voice_state,
+                             nullptr);
   esp_event_handler_register(APP_EVENT, APP_EVENT_VOICE_TRANSCRIPT,
                              on_voice_transcript, nullptr);
 }
@@ -256,7 +259,6 @@ extern "C" void app_main() {
 
   init_nvs();
   settings_init();
-  settings_mount_spiffs();
   settings_load_config_from_sd();
 
   s_volume = settings_get_volume();

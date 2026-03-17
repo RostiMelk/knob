@@ -5,17 +5,9 @@ import { join, resolve } from "path";
 const ROOT = resolve(import.meta.dir, "..");
 const STATIONS_JSON = join(ROOT, "stations.json");
 const LOGO_DIR = join(ROOT, "assets", "logos");
-const BG_DIR = join(ROOT, "assets", "logos", "bg");
 const APP_CONFIG = join(ROOT, "main", "app_config.h");
 
-const LOGO_SIZE = 100;
-const BG_SIZE = 360;
-const BG_BLUR_SIGMA = 90;
-const BG_DEFAULT_MODULATE = "40,130,100";
-const BG_DARK_MODULATE = "80,200,100";
-const BG_DEFAULT_BC = "-10x10";
-const BG_DARK_BC = "5x15";
-const DARK_THRESHOLD = 65; // dominant brightness below this = "dark" source
+const LOGO_SIZE = 120;
 
 interface Station {
   id: string;
@@ -26,7 +18,7 @@ interface Station {
 }
 
 function ensureDirs() {
-  for (const dir of [LOGO_DIR, BG_DIR]) {
+  for (const dir of [LOGO_DIR]) {
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   }
 }
@@ -52,34 +44,6 @@ async function downloadLogo(station: Station): Promise<string> {
   await $`rm -f ${tmp}`.quiet();
 
   return dest;
-}
-
-async function getDominantBrightness(path: string): Promise<number> {
-  // Resize to 1x1 first — gives area-weighted dominant color, ignores small text/details
-  const result =
-    await $`magick ${path} -resize 1x1! -colorspace Gray -format "%[fx:mean*100]" info:`.quiet();
-  return parseFloat(result.text().trim());
-}
-
-async function generateBackground(station: Station, logoPath: string) {
-  const dest = join(BG_DIR, `${station.id}_bg.png`);
-  const brightness = await getDominantBrightness(logoPath);
-  const isDark = brightness < DARK_THRESHOLD;
-
-  const modulate = isDark ? BG_DARK_MODULATE : BG_DEFAULT_MODULATE;
-  const bc = isDark ? BG_DARK_BC : BG_DEFAULT_BC;
-
-  if (isDark) {
-    console.log(
-      `  ◐ ${station.id}_bg.png (dark source: ${brightness.toFixed(1)}%, boosted)`,
-    );
-  } else {
-    console.log(
-      `  ◑ ${station.id}_bg.png (brightness: ${brightness.toFixed(1)}%)`,
-    );
-  }
-
-  await $`magick ${logoPath} -resize ${BG_SIZE}x${BG_SIZE}! -blur 0x${BG_BLUR_SIGMA} -modulate ${modulate} -brightness-contrast ${bc} PNG24:${dest}`.quiet();
 }
 
 function generateCppArray(stations: Station[]): string {
@@ -141,14 +105,8 @@ async function main() {
   ensureDirs();
 
   console.log("Downloading logos...");
-  const logoPaths: string[] = [];
   for (const station of stations) {
-    logoPaths.push(await downloadLogo(station));
-  }
-
-  console.log("\nGenerating blurred backgrounds...");
-  for (let i = 0; i < stations.length; i++) {
-    await generateBackground(stations[i], logoPaths[i]);
+    await downloadLogo(station);
   }
 
   if (!skipCpp) {
@@ -157,8 +115,7 @@ async function main() {
   }
 
   console.log("\nDone ✓");
-  console.log(`  Logos:       ${LOGO_DIR}/`);
-  console.log(`  Backgrounds: ${BG_DIR}/`);
+  console.log(`  Logos: ${LOGO_DIR}/`);
   console.log(
     `\nTo add a station: edit stations.json, run: bun scripts/gen_stations.ts`,
   );

@@ -1,7 +1,6 @@
 #include "settings.h"
 #include "app_config.h"
 
-#include "esp_spiffs.h"
 #include "driver/sdmmc_host.h"
 #include "esp_log.h"
 #include "esp_vfs_fat.h"
@@ -128,27 +127,6 @@ void settings_set_openai_api_key(const char *key) {
   write_str(KEY_OPENAI_KEY, key);
 }
 
-// ─── SPIFFS (embedded logos) ─────────────────────────────────────────────────
-
-bool settings_mount_spiffs() {
-  esp_vfs_spiffs_conf_t conf = {};
-  conf.base_path = "/spiffs";
-  conf.partition_label = "storage";
-  conf.max_files = 5;
-  conf.format_if_mount_failed = false;
-
-  esp_err_t ret = esp_vfs_spiffs_register(&conf);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "SPIFFS mount failed: %s", esp_err_to_name(ret));
-    return false;
-  }
-
-  size_t total = 0, used = 0;
-  esp_spiffs_info("storage", &total, &used);
-  ESP_LOGI(TAG, "SPIFFS mounted: %zu/%zu bytes used", used, total);
-  return true;
-}
-
 // ─── SD Card Config File ────────────────────────────────────────────────────
 // Standard .env format: KEY=value, one per line. # comments.
 // See .env.template in project root.
@@ -232,7 +210,7 @@ static void apply_config_line(char *line) {
 
 bool settings_load_config_from_sd() {
   if (!mount_sd()) {
-    ESP_LOGI(TAG, "No SD card — logos will load from SPIFFS");
+    ESP_LOGI(TAG, "No SD card");
     return false;
   }
 

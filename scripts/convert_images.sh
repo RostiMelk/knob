@@ -1,27 +1,21 @@
 #!/usr/bin/env bash
-# Converts PNG assets to LVGL binary format for SPIFFS embedding.
+# Converts PNG logos to LVGL C arrays for firmware embedding.
 # Run from project root: ./scripts/convert_images.sh
 #
-# This is also run automatically by CMake during build, but you can run it
-# manually to inspect the output or test changes.
-#
-# Logos: ARGB8888 (preserve alpha transparency)
-# Backgrounds: RGB565 with Floyd-Steinberg dithering (fixes gradient banding)
+# Logos: RGB565A8 + LZ4 compression + premultiplied alpha → C arrays
+# Backgrounds: solid colors at runtime (no image files needed)
 #
 # Prerequisites: pip3 install pypng lz4
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-# LVGLImage.py ships with LVGL managed component (downloaded by idf.py build)
 LVGL_IMAGE="$PROJECT_DIR/managed_components/lvgl__lvgl/scripts/LVGLImage.py"
 if [ ! -f "$LVGL_IMAGE" ]; then
-    # Fallback: local copy in scripts/
     LVGL_IMAGE="$SCRIPT_DIR/LVGLImage.py"
 fi
-OUTPUT_DIR="$PROJECT_DIR/build/spiffs_data"
+OUTPUT_DIR="$PROJECT_DIR/main/ui/images"
 
-# Check prerequisites
 if ! python3 -c "import png" 2>/dev/null; then
     echo "ERROR: pypng not installed. Run: pip3 install pypng lz4"
     exit 1
@@ -33,21 +27,37 @@ if [ ! -f "$LVGL_IMAGE" ]; then
     exit 1
 fi
 
-rm -rf "$OUTPUT_DIR"
-mkdir -p "$OUTPUT_DIR/bg"
+# Preserve the hand-written header
+HEADER="$OUTPUT_DIR/images.h"
+HEADER_BAK=""
+if [ -f "$HEADER" ]; then
+    HEADER_BAK=$(mktemp)
+    cp "$HEADER" "$HEADER_BAK"
+fi
 
-echo "Converting logos (ARGB8888)..."
-python3 "$LVGL_IMAGE" --cf ARGB8888 --ofmt BIN -o "$OUTPUT_DIR" "$PROJECT_DIR/assets/logos/"
+# Remove old generated .c files (keep images.h)
+find "$OUTPUT_DIR" -name '*.c' -delete 2>/dev/null || true
 
-# LVGLImage.py may convert bg/ subfolder contents with ARGB8888 — remove them
-rm -f "$OUTPUT_DIR"/*_bg.bin
+echo "Converting logos (RGB565A8 + LZ4 + premultiply)..."
+python3 "$LVGL_IMAGE" --cf RGB565A8 --compress LZ4 --premultiply --ofmt C -o "$OUTPUT_DIR" "$PROJECT_DIR/assets/logos/"
 
-echo "Converting backgrounds (RGB565 + dithering)..."
-python3 "$LVGL_IMAGE" --cf RGB565 --rgb565dither --ofmt BIN -o "$OUTPUT_DIR/bg" "$PROJECT_DIR/assets/logos/bg/"
+# Remove background artifacts picked up from bg/ subfolder
+rm -f "$OUTPUT_DIR"/*_bg*
+
+# Restore header
+if [ -n "$HEADER_BAK" ]; then
+    cp "$HEADER_BAK" "$HEADER"
+    rm -f "$HEADER_BAK"
+fi
 
 echo ""
-echo "Done! Converted files:"
-ls -la "$OUTPUT_DIR"/*.bin "$OUTPUT_DIR/bg/"*.bin 2>/dev/null
+echo "Done! Generated C arrays:"
+ls -la "$OUTPUT_DIR"/*.c 2>/dev/null
 TOTAL=$(du -sh "$OUTPUT_DIR" | cut -f1)
 echo ""
-echo "Total size: $TOTAL (SPIFFS partition: 9MB)"
+echo "Total size: $TOTAL (compiled into firmware binary)"
+echo ""
+echo "Remember to:"
+echo "  1. Add any new .c files to main/CMakeLists.txt SRCS"
+echo "  2. Add LV_IMAGE_DECLARE() to main/ui/images/images.h"
+echo "  3. Add &symbol to s_logos[] in main/ui/ui.cpp"

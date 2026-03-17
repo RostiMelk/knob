@@ -5,6 +5,18 @@ set(SRCS
     "fonts/geist_regular_22.c"
     "fonts/geist_medium_28.c"
     "fonts/geist_medium_52.c"
+    "ui/images/nrj.c"
+    "ui/images/nrk_jazz.c"
+    "ui/images/nrk_mp3.c"
+    "ui/images/nrk_nyheter.c"
+    "ui/images/nrk_p1.c"
+    "ui/images/nrk_p2.c"
+    "ui/images/nrk_p3.c"
+    "ui/images/p4.c"
+    "ui/images/p5.c"
+    "ui/images/p9.c"
+    "ui/images/radio_norge.c"
+    "ui/images/radio_rock.c"
     "net/wifi_manager.cpp"
     "sonos/sonos.cpp"
     "sonos/discovery.cpp"
@@ -48,7 +60,6 @@ idf_component_register(
         esp-tls
         fatfs
         sdmmc
-        spiffs
 )
 
 target_compile_options(${COMPONENT_LIB} PUBLIC
@@ -57,27 +68,6 @@ target_compile_options(${COMPONENT_LIB} PUBLIC
     -fno-rtti
 )
 
-# ── Image conversion: PNG → LVGL .bin at build time ──────────────────────────────
-# Logos: ARGB8888 (preserves alpha). Backgrounds: RGB565 + dithering (fixes banding).
-# Output goes to build/spiffs_data/ which gets packed into the SPIFFS partition.
-
-set(SPIFFS_DIR "${CMAKE_BINARY_DIR}/spiffs_data")
-# LVGLImage.py ships with LVGL — use the managed component copy
-# (downloaded automatically by idf.py build via idf_component.yml)
-set(LVGL_IMAGE "${CMAKE_SOURCE_DIR}/managed_components/lvgl__lvgl/scripts/LVGLImage.py")
-set(LOGO_SRC "${CMAKE_SOURCE_DIR}/assets/logos")
-
-add_custom_command(
-    OUTPUT ${SPIFFS_DIR}/.stamp
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${SPIFFS_DIR}/bg
-    COMMAND python3 ${LVGL_IMAGE} --cf ARGB8888 --ofmt BIN -o ${SPIFFS_DIR} ${LOGO_SRC}/
-    COMMAND ${CMAKE_COMMAND} -E remove -f ${SPIFFS_DIR}/*_bg.bin
-    COMMAND python3 ${LVGL_IMAGE} --cf RGB565 --rgb565dither --ofmt BIN -o ${SPIFFS_DIR}/bg ${LOGO_SRC}/bg/
-    COMMAND ${CMAKE_COMMAND} -E touch ${SPIFFS_DIR}/.stamp
-    DEPENDS ${LOGO_SRC}
-    COMMENT "Converting PNG assets to LVGL binary format"
-)
-add_custom_target(convert_images DEPENDS ${SPIFFS_DIR}/.stamp)
-add_dependencies(${COMPONENT_LIB} convert_images)
-
-spiffs_create_partition_image(storage ${SPIFFS_DIR} FLASH_IN_PROJECT)
+# Generated LVGL image C files use #ifdef LV_LVGL_H_INCLUDE_SIMPLE to pick
+# the right include path. ESP-IDF's LVGL port expects "lvgl.h" (simple).
+target_compile_definitions(${COMPONENT_LIB} PRIVATE LV_LVGL_H_INCLUDE_SIMPLE)

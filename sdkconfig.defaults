@@ -6,7 +6,7 @@ CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
 CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
 
-# Custom partition table (16MB flash with SPIFFS storage)
+# Custom partition table (16MB flash, dual OTA)
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 
@@ -66,9 +66,9 @@ CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
 # Console via USB-UART bridge
 CONFIG_ESP_CONSOLE_UART_DEFAULT=y
 
-# LVGL filesystem (POSIX)
-CONFIG_LV_USE_FS_POSIX=y
-CONFIG_LV_FS_POSIX_LETTER=65
+# LVGL LZ4 decompression for embedded compressed images
+CONFIG_LV_BIN_DECODER_RAM_LOAD=y
+CONFIG_LV_USE_LZ4=y
 
 # LVGL memory: use C stdlib malloc so large allocations go to PSRAM
 # (Kconfig choice: must explicitly disable builtin to switch)
@@ -77,17 +77,13 @@ CONFIG_LV_USE_CLIB_MALLOC=y
 # CONFIG_LV_USE_BUILTIN_STRING is not set
 CONFIG_LV_USE_CLIB_STRING=y
 
-# LVGL image cache — decoded images stay in PSRAM to avoid re-decoding
-# LV_CACHE_DEF_SIZE is in bytes: 22 images × ~150KB avg = ~3.2MB (fits in 8MB PSRAM)
-# LV_IMAGE_HEADER_CACHE_DEF_CNT is count of cached headers
-CONFIG_LV_CACHE_DEF_SIZE=3200000
+# LVGL image cache — decoded logo images stay in PSRAM
+# 12 logos × ~43KB RGB565A8 decoded + headroom for crossfade layers
+CONFIG_LV_CACHE_DEF_SIZE=1048576
 CONFIG_LV_IMAGE_HEADER_CACHE_DEF_CNT=24
 
 # LVGL refresh period — smoother animations (default is 33ms)
 CONFIG_LV_DEF_REFR_PERIOD=10
-
-# Performance monitor — shows FPS overlay for tuning (remove for release)
-CONFIG_LV_USE_PERF_MONITOR=y
 
 # Pin main task to Core 1 (matches LVGL task affinity)
 CONFIG_ESP_MAIN_TASK_AFFINITY_CPU1=y

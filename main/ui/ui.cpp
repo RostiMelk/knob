@@ -5,12 +5,12 @@
 #include "sonos/sonos.h"
 #include "storage/settings.h"
 #include "ui/display.h"
+#include "ui/images/images.h"
 #include "ui_pages.h"
 #include "ui_timer.h"
 #include "ui_voice.h"
 
 #include "esp_log.h"
-#include "esp_timer.h"
 #include "lvgl.h"
 
 #include <algorithm>
@@ -20,7 +20,8 @@
 
 static constexpr const char *TAG = "ui";
 
-// ─── Interaction Model ────────────────────────────────────────────────────────────────────
+// ─── Interaction Model
+// ────────────────────────────────────────────────────────────────────
 //
 //  VOLUME mode (default):
 //    encoder turn  → volume arc brightens + number appears
@@ -39,8 +40,11 @@ static constexpr int VOL_DISPLAY_MS = 1500;
 static constexpr int ANIM_FADE_MS = 200;
 static constexpr int ANIM_QUICK_MS = 100;
 static constexpr int ANIM_ARC_FADE_MS = 400;
+static constexpr int ANIM_BG_FADE_MS = 250;
+static constexpr int ANIM_BG_BROWSE_MS = 250;
 
-// ─── Palette ────────────────────────────────────────────────────────────────────────────
+// ─── Palette
+// ────────────────────────────────────────────────────────────────────────────
 
 #define COL_BG lv_color_hex(0x000000)
 #define COL_TEXT lv_color_hex(0xFFFFFF)
@@ -54,7 +58,8 @@ static constexpr int ANIM_ARC_FADE_MS = 400;
 #define COL_RED lv_color_hex(0xFF453A)
 #define COL_BROWSE_BG lv_color_hex(0x0A0A0A)
 
-// ─── State ──────────────────────────────────────────────────────────────────────────────
+// ─── State
+// ──────────────────────────────────────────────────────────────────────────────
 
 static Mode s_mode = Mode::Volume;
 static int s_volume;
@@ -63,7 +68,8 @@ static int s_browse_index;
 static PlayState s_play_state = PlayState::Stopped;
 static bool s_was_playing;
 
-// ─── Widgets ────────────────────────────────────────────────────────────────────────────
+// ─── Widgets
+// ────────────────────────────────────────────────────────────────────────────
 
 static lv_obj_t *s_screen;
 static lv_obj_t *s_home;
@@ -71,9 +77,10 @@ static lv_obj_t *s_home;
 // Status bar (top)
 static lv_obj_t *s_wifi_dot;
 
-// Background (blurred artwork)
-static lv_obj_t *s_bg_img;
-static lv_obj_t *s_bg_dim; // Black overlay for dimming (cheaper than image_opa)
+// Background (two solid color layers for tear-free crossfade)
+static lv_obj_t *s_bg_back; // Bottom layer: current station color, fully opaque
+static lv_obj_t *s_bg_front; // Top layer: fades in with new station color
+static lv_obj_t *s_bg_dim;   // Black overlay for edge darkening
 
 // Artwork area (center)
 static lv_obj_t *s_img_logo;
@@ -119,48 +126,83 @@ static DiscoveryResult s_discovered;
 static int s_speaker_highlight;
 static bool s_on_picker;
 
-// ─── Logo Paths (SPIFFS) ────────────────────────────────────────────────────────────────
+// ─── Station Images (compiled into firmware as C arrays)
+// ────────────────────────────────────────────────────
 
-#ifdef SIMULATOR
-static constexpr const char *LOGO_DIR = "A:assets/logos/";
-static constexpr const char *BG_DIR = "A:assets/logos/bg/";
-#else
-static constexpr const char *LOGO_DIR = "A:/spiffs/";
-static constexpr const char *BG_DIR = "A:/spiffs/bg/";
-#endif
+static const lv_image_dsc_t *const s_logos[STATION_COUNT] = {
+    &nrk_p1, &nrk_p2, &nrk_p3, &nrk_mp3,    &nrk_jazz,    &nrk_nyheter,
+    &p4,     &p5,     &p9,     &radio_rock, &radio_norge, &nrj,
+};
 
-static char s_logo_path[128];
-static char s_bg_path[128];
+static void set_logo(int index) {
+  if (index < 0 || index >= STATION_COUNT)
+    return;
+  lv_image_set_src(s_img_logo, s_logos[index]);
+}
 
-static void set_logo(int index, bool logo_only = false) {
+// ─── Background Crossfade (two-layer solid color opacity fade — tear-free)
+// ─────────────────────────────────────────────────────
+//
+// Two full-screen solid color layers stacked. Transition: front layer gets the
+// new station color and fades from transparent → opaque. Filling a solid rect
+// is near-zero CPU cost — no image blending. Per-frame opacity delta is tiny,
+// making any mid-flush DMA split invisible even with the 36-row buffer.
+
+static void anim_bg_crossfade_cb(void *obj, int32_t v) {
+  lv_obj_set_style_bg_opa(static_cast<lv_obj_t *>(obj), v, LV_PART_MAIN);
+}
+
+static void anim_bg_crossfade_done(lv_anim_t *a) {
+  // Front is now fully opaque — copy its color to back and reset front.
+  lv_color_t c = lv_obj_get_style_bg_color(s_bg_front, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(s_bg_back, c, LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(s_bg_front, LV_OPA_TRANSP, LV_PART_MAIN);
+}
+
+static void set_bg(int index, bool animate) {
   if (index < 0 || index >= STATION_COUNT)
     return;
 
-  const char *logo_file = STATIONS[index].logo;
-  const char *ext = strrchr(logo_file, '.');
-  size_t base_len =
-      ext ? static_cast<size_t>(ext - logo_file) : strlen(logo_file);
+  lv_color_t target = lv_color_hex(STATIONS[index].color);
 
-  snprintf(s_logo_path, sizeof(s_logo_path), "%s%.*s.bin", LOGO_DIR,
-           static_cast<int>(base_len), logo_file);
-  int64_t t0 = esp_timer_get_time();
-  lv_image_set_src(s_img_logo, s_logo_path);
-  int64_t t1 = esp_timer_get_time();
-
-  if (!logo_only) {
-    snprintf(s_bg_path, sizeof(s_bg_path), "%s%.*s_bg.bin", BG_DIR,
-             static_cast<int>(base_len), logo_file);
-    lv_image_set_src(s_bg_img, s_bg_path);
+  // If a crossfade is in progress, finish it immediately
+  lv_anim_delete(s_bg_front, anim_bg_crossfade_cb);
+  int32_t front_opa = lv_obj_get_style_bg_opa(s_bg_front, LV_PART_MAIN);
+  if (front_opa > LV_OPA_TRANSP) {
+    // Collapse mid-fade: promote front to back
+    lv_color_t fc = lv_obj_get_style_bg_color(s_bg_front, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_bg_back, fc, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_bg_front, LV_OPA_TRANSP, LV_PART_MAIN);
   }
-  int64_t t2 = esp_timer_get_time();
 
-  ESP_LOGI("PERF", "set_logo[%d%s]: logo=%lld us  bg=%lld us  total=%lld us",
-           index, logo_only ? " (logo only)" : "",
-           (long long)(t1 - t0), (long long)(t2 - t1),
-           (long long)(t2 - t0));
+  // Already showing this color?
+  lv_color_t current = lv_obj_get_style_bg_color(s_bg_back, LV_PART_MAIN);
+  if (current.red == target.red && current.green == target.green &&
+      current.blue == target.blue)
+    return;
+
+  if (!animate) {
+    lv_obj_set_style_bg_color(s_bg_back, target, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_bg_front, LV_OPA_TRANSP, LV_PART_MAIN);
+    return;
+  }
+
+  // Set front to new color, crossfade its opacity
+  lv_obj_set_style_bg_color(s_bg_front, target, LV_PART_MAIN);
+
+  lv_anim_t a;
+  lv_anim_init(&a);
+  lv_anim_set_var(&a, s_bg_front);
+  lv_anim_set_exec_cb(&a, anim_bg_crossfade_cb);
+  lv_anim_set_values(&a, LV_OPA_TRANSP, LV_OPA_COVER);
+  lv_anim_set_duration(&a, ANIM_BG_FADE_MS);
+  lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
+  lv_anim_set_completed_cb(&a, anim_bg_crossfade_done);
+  lv_anim_start(&a);
 }
 
-// ─── Forward Declarations ─────────────────────────────────────────────────────────────
+// ─── Forward Declarations
+// ─────────────────────────────────────────────────────────────
 
 static void enter_browse();
 static void exit_browse();
@@ -175,7 +217,8 @@ static void activate_voice();
 static void deactivate_voice();
 static void on_page_changed(int index, const char *id);
 
-// ─── Animation Helpers ────────────────────────────────────────────────────────────────
+// ─── Animation Helpers
+// ────────────────────────────────────────────────────────────────
 
 static void anim_opa_cb(void *obj, int32_t v) {
   lv_obj_set_style_opa(static_cast<lv_obj_t *>(obj), v, LV_PART_MAIN);
@@ -218,13 +261,14 @@ static void anim_fade(lv_obj_t *obj, lv_anim_exec_xcb_t exec_cb, int32_t start,
   lv_anim_set_values(&a, start, end);
   lv_anim_set_duration(&a, duration);
   lv_anim_set_path_cb(&a, duration <= 150 ? lv_anim_path_linear
-                                             : lv_anim_path_ease_in_out);
+                                          : lv_anim_path_ease_in_out);
   if (done_cb)
     lv_anim_set_completed_cb(&a, done_cb);
   lv_anim_start(&a);
 }
 
-// ─── Volume Arc ─────────────────────────────────────────────────────────────────────
+// ─── Volume Arc
+// ─────────────────────────────────────────────────────────────────────
 
 static void on_vol_hide(lv_timer_t *) {
   anim_fade(s_vol_arc, anim_arc_ind_opa_cb, LV_OPA_COVER, LV_OPA_30,
@@ -232,15 +276,19 @@ static void on_vol_hide(lv_timer_t *) {
   lv_timer_pause(s_vol_hide_timer);
 }
 
-// ─── Browse rotation callback (deferred image load) ────────────────────────────────
+// ─── Browse rotation callback (deferred image load)
+// ────────────────────────────────
 
 static void on_browse_rotate_fade_done(lv_anim_t *) {
-  set_logo(s_browse_index, true); // Skip 259KB bg during browse — swap on confirm
+  // Only swap logo during browse — bg stays on the playing station's image.
+  // Bg only transitions on confirm/exit (tap to play).
+  set_logo(s_browse_index);
   anim_fade(s_logo_container, anim_opa_cb, LV_OPA_TRANSP, LV_OPA_70,
             ANIM_QUICK_MS);
 }
 
-// ─── Clock ────────────────────────────────────────────────────────────────────────────
+// ─── Clock
+// ────────────────────────────────────────────────────────────────────────────
 
 static void update_clock() {
   time_t now = time(nullptr);
@@ -256,16 +304,21 @@ static bool home_should_idle() {
   return s_play_state == PlayState::Stopped && s_mode == Mode::Volume;
 }
 
+static bool s_idle_active = false;
+
 static void show_idle_ui(bool idle) {
   if (!pages_is_home())
     return;
+  if (idle == s_idle_active)
+    return;
+  s_idle_active = idle;
 
   lv_anim_delete(s_lbl_clock, anim_opa_cb);
   lv_anim_delete(s_logo_container, anim_opa_cb);
   lv_anim_delete(s_lbl_station, anim_opa_cb);
   lv_anim_delete(s_lbl_speaker, anim_opa_cb);
   lv_anim_delete(s_lbl_subtitle, anim_opa_cb);
-  lv_anim_delete(s_bg_img, anim_img_opa_cb);
+  lv_anim_delete(s_bg_front, anim_bg_crossfade_cb);
   lv_anim_delete(s_bg_dim, anim_bg_opa_cb);
 
   if (idle) {
@@ -283,8 +336,6 @@ static void show_idle_ui(bool idle) {
     anim_fade(s_lbl_speaker, anim_opa_cb, LV_OPA_60, LV_OPA_TRANSP,
               ANIM_FADE_MS, anim_hide_done);
 
-    // Keep bg image at full opacity, dim with overlay instead (no expensive layer)
-    lv_obj_set_style_image_opa(s_bg_img, LV_OPA_COVER, LV_PART_MAIN);
     anim_fade(s_bg_dim, anim_bg_opa_cb, LV_OPA_TRANSP, LV_OPA_70, ANIM_FADE_MS);
 
     lv_obj_set_style_opa(s_lbl_subtitle, LV_OPA_TRANSP, LV_PART_MAIN);
@@ -335,7 +386,8 @@ static void show_volume(int level) {
   lv_timer_resume(s_vol_hide_timer);
 }
 
-// ─── Mode Switching ─────────────────────────────────────────────────────────────────
+// ─── Mode Switching
+// ─────────────────────────────────────────────────────────────────
 
 static void enter_browse() {
   s_mode = Mode::Browse;
@@ -379,10 +431,9 @@ static void enter_browse() {
   lv_timer_resume(s_browse_timer);
 }
 
-// Called after fade-out completes during browse exit — swaps image while hidden
+// Called after fade-out completes during browse exit — swaps logo while hidden
 static void on_exit_browse_fade_done(lv_anim_t *a) {
   set_logo(s_station_index);
-  // Fade back in
   anim_fade(s_logo_container, anim_opa_cb, LV_OPA_TRANSP, LV_OPA_COVER,
             ANIM_FADE_MS);
 }
@@ -394,6 +445,9 @@ static void exit_browse() {
 
   lv_label_set_text(s_lbl_station, STATIONS[s_station_index].name);
   update_subtitle();
+
+  // Crossfade bg back to the playing station (only if it changed)
+  set_bg(s_station_index, true);
 
   bool needs_image_swap = (s_browse_index != s_station_index);
 
@@ -440,6 +494,8 @@ static void exit_browse() {
 static void confirm_browse() {
   s_station_index = s_browse_index;
   set_logo(s_station_index);
+  // Crossfade bg to the newly confirmed station
+  set_bg(s_station_index, true);
   int32_t idx = s_station_index;
   esp_event_post(APP_EVENT, APP_EVENT_STATION_CHANGED, &idx, sizeof(idx), 0);
   esp_event_post(APP_EVENT, APP_EVENT_PLAY_REQUESTED, nullptr, 0, 0);
@@ -450,7 +506,8 @@ static void confirm_browse() {
 
 static void on_browse_timeout(lv_timer_t *) { exit_browse(); }
 
-// ─── Subtitle (play state) ────────────────────────────────────────────────────────────
+// ─── Subtitle (play state)
+// ────────────────────────────────────────────────────────────
 
 static void update_subtitle() {
   const char *text;
@@ -474,7 +531,8 @@ static void update_subtitle() {
   lv_label_set_text(s_lbl_subtitle, text);
 }
 
-// ─── Touch ────────────────────────────────────────────────────────────────────────────
+// ─── Touch
+// ────────────────────────────────────────────────────────────────────────────
 
 static void on_tap_delay(lv_timer_t *) {
   lv_timer_pause(s_tap_delay_timer);
@@ -578,23 +636,32 @@ static void on_screen_released(lv_event_t *) {
   }
 }
 
-// ─── Main Screen ────────────────────────────────────────────────────────────────────
+// ─── Main Screen
+// ────────────────────────────────────────────────────────────────────
 
-// ─── Home Page (page 0 in pager) ────────────────────────────────────────────────────────
+// ─── Home Page (page 0 in pager)
+// ────────────────────────────────────────────────────────
 
 static void home_page_build(lv_obj_t *parent) {
   s_home = parent;
 
-  // ── Blurred background ──
-  s_bg_img = lv_image_create(parent);
-  lv_obj_set_size(s_bg_img, LCD_H_RES, LCD_V_RES);
-  lv_obj_align(s_bg_img, LV_ALIGN_CENTER, 0, 0);
-  lv_image_set_inner_align(s_bg_img, LV_IMAGE_ALIGN_CENTER);
-  lv_obj_set_style_image_opa(s_bg_img, LV_OPA_COVER, LV_PART_MAIN);
-  lv_obj_remove_flag(s_bg_img, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_remove_flag(s_bg_img, LV_OBJ_FLAG_SCROLLABLE);
+  // ── Background layers (two solid colors for tear-free crossfade) ──
+  auto make_bg_layer = [&](lv_color_t color, lv_opa_t opa) {
+    lv_obj_t *obj = lv_obj_create(parent);
+    lv_obj_set_size(obj, LCD_H_RES, LCD_V_RES);
+    lv_obj_align(obj, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_bg_color(obj, color, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(obj, opa, LV_PART_MAIN);
+    lv_obj_set_style_border_width(obj, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(obj, 0, LV_PART_MAIN);
+    lv_obj_remove_flag(obj, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
+    return obj;
+  };
+  s_bg_back = make_bg_layer(lv_color_hex(STATIONS[0].color), LV_OPA_COVER);
+  s_bg_front = make_bg_layer(lv_color_black(), LV_OPA_TRANSP);
 
-  // ── Black dimming overlay (cheaper than animating image opacity) ──
+  // ── Black dimming overlay (edge darkening for depth) ──
   s_bg_dim = lv_obj_create(parent);
   lv_obj_set_size(s_bg_dim, LCD_H_RES, LCD_V_RES);
   lv_obj_align(s_bg_dim, LV_ALIGN_CENTER, 0, 0);
@@ -622,25 +689,20 @@ static void home_page_build(lv_obj_t *parent) {
   lv_obj_set_style_arc_rounded(s_vol_arc, true, LV_PART_INDICATOR);
   lv_obj_set_style_bg_opa(s_vol_arc, LV_OPA_TRANSP, LV_PART_KNOB);
 
-  // ── Station logo — rounded card with colored shadow ──
+  // ── Station logo — squircle card ──
   s_logo_container = lv_obj_create(parent);
-  lv_obj_set_size(s_logo_container, 100, 100);
-  lv_obj_set_style_radius(s_logo_container, 20, LV_PART_MAIN);
+  lv_obj_set_size(s_logo_container, 120, 120);
+  lv_obj_set_style_radius(s_logo_container, 27, LV_PART_MAIN);
   lv_obj_set_style_bg_opa(s_logo_container, LV_OPA_TRANSP, LV_PART_MAIN);
   lv_obj_set_style_border_width(s_logo_container, 0, LV_PART_MAIN);
   lv_obj_set_style_pad_all(s_logo_container, 0, LV_PART_MAIN);
   lv_obj_set_style_clip_corner(s_logo_container, true, LV_PART_MAIN);
-  lv_obj_set_style_shadow_width(s_logo_container, 20, LV_PART_MAIN);
-  lv_obj_set_style_shadow_spread(s_logo_container, 2, LV_PART_MAIN);
-  lv_obj_set_style_shadow_color(s_logo_container, lv_color_black(),
-                                LV_PART_MAIN);
-  lv_obj_set_style_shadow_opa(s_logo_container, LV_OPA_40, LV_PART_MAIN);
   lv_obj_remove_flag(s_logo_container, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_remove_flag(s_logo_container, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_align(s_logo_container, LV_ALIGN_CENTER, 0, -30);
 
   s_img_logo = lv_image_create(s_logo_container);
-  lv_obj_set_size(s_img_logo, 100, 100);
+  lv_obj_set_size(s_img_logo, 120, 120);
   lv_image_set_inner_align(s_img_logo, LV_IMAGE_ALIGN_CENTER);
   lv_obj_set_pos(s_img_logo, 0, 0);
   set_logo(0);
@@ -724,7 +786,8 @@ static void build_main_screen() {
   lv_obj_align(s_wifi_dot, LV_ALIGN_TOP_MID, 0, 36);
 }
 
-// ─── Speaker Picker (first boot only) ───────────────────────────────────────────────
+// ─── Speaker Picker (first boot only)
+// ───────────────────────────────────────────────
 
 static void on_speaker_tap(lv_event_t *e) {
   auto index =
@@ -795,7 +858,9 @@ static void rebuild_speaker_list() {
     lv_obj_set_style_radius(btn, 12, LV_PART_MAIN);
     lv_obj_remove_flag(btn, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_style_bg_color(btn, COL_ACCENT, static_cast<lv_style_selector_t>(LV_PART_MAIN | LV_STATE_PRESSED));
+    lv_obj_set_style_bg_color(
+        btn, COL_ACCENT,
+        static_cast<lv_style_selector_t>(LV_PART_MAIN | LV_STATE_PRESSED));
 
     lv_obj_t *lbl = lv_label_create(btn);
     lv_obj_set_style_text_color(lbl, COL_TEXT, LV_PART_MAIN);
@@ -822,8 +887,9 @@ static void rebuild_speaker_list() {
   lv_obj_set_style_radius(skip_btn, 12, LV_PART_MAIN);
   lv_obj_remove_flag(skip_btn, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_add_flag(skip_btn, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_set_style_bg_color(skip_btn, COL_ACCENT,
-                            static_cast<lv_style_selector_t>(LV_PART_MAIN | LV_STATE_PRESSED));
+  lv_obj_set_style_bg_color(
+      skip_btn, COL_ACCENT,
+      static_cast<lv_style_selector_t>(LV_PART_MAIN | LV_STATE_PRESSED));
 
   lv_obj_t *skip_lbl = lv_label_create(skip_btn);
   lv_obj_set_style_text_color(skip_lbl, COL_TEXT_SEC, LV_PART_MAIN);
@@ -833,7 +899,8 @@ static void rebuild_speaker_list() {
   lv_obj_add_event_cb(skip_btn, on_skip_tap, LV_EVENT_CLICKED, nullptr);
 }
 
-// ─── Scanning Overlay ───────────────────────────────────────────────────────────────
+// ─── Scanning Overlay
+// ───────────────────────────────────────────────────────────────
 
 static void build_scanning_overlay() {
   s_scanning_overlay = lv_obj_create(s_screen);
@@ -853,7 +920,8 @@ static void build_scanning_overlay() {
   lv_obj_center(s_lbl_scanning);
 }
 
-// ─── Public API ─────────────────────────────────────────────────────────────────────
+// ─── Public API
+// ─────────────────────────────────────────────────────────────────────
 
 void ui_init() {
   lv_display_t *disp = nullptr;
@@ -886,24 +954,8 @@ void ui_init() {
 
     show_idle_ui(true);
 
-    // Pre-warm LVGL image cache — load all station logos + backgrounds from SPIFFS.
-    // First load is ~120ms per image (SPIFFS I/O), but once cached, <2ms.
-    // Total: ~12 stations × 2 images × ~120ms ≈ 3s at boot. Worth it for
-    // instant station switching afterwards.
-    ESP_LOGI(TAG, "Pre-warming image cache (%d stations)...", STATION_COUNT);
-    int64_t preload_start = esp_timer_get_time();
-    for (int i = 0; i < STATION_COUNT; i++) {
-      set_logo(i);
-      // Yield the display lock briefly so LVGL can flush if needed
-      display_unlock();
-      vTaskDelay(pdMS_TO_TICKS(1));
-      display_lock(200);
-    }
-    // Restore to the saved station
     set_logo(s_station_index);
-    int64_t preload_end = esp_timer_get_time();
-    ESP_LOGI(TAG, "Image cache warm: %lld ms",
-             (long long)(preload_end - preload_start) / 1000);
+    set_bg(s_station_index, /*animate=*/false);
 
     char saved_name[64] = {};
     settings_get_speaker_name(saved_name, sizeof(saved_name));
@@ -928,6 +980,8 @@ void ui_set_volume(int level) {
 }
 
 void ui_set_play_state(PlayState state) {
+  if (state == s_play_state)
+    return;
   if (display_lock(50)) {
     s_play_state = state;
     if (s_mode == Mode::Volume) {
@@ -941,11 +995,14 @@ void ui_set_play_state(PlayState state) {
 void ui_set_station(int index) {
   if (index < 0 || index >= STATION_COUNT)
     return;
+  if (index == s_station_index)
+    return;
   if (display_lock(50)) {
     s_station_index = index;
     if (s_mode == Mode::Volume) {
       lv_label_set_text(s_lbl_station, STATIONS[index].name);
       set_logo(index);
+      set_bg(index, true);
     }
     display_unlock();
   }
@@ -969,7 +1026,8 @@ void ui_set_speaker_name(const char *name) {
   }
 }
 
-// ─── Voice Mode ─────────────────────────────────────────────────────────────────────
+// ─── Voice Mode
+// ─────────────────────────────────────────────────────────────────────
 
 void ui_voice_activate() {
   if (!display_lock(50))
@@ -1057,7 +1115,6 @@ void ui_on_encoder_rotate(int32_t steps) {
         ((new_idx % STATION_COUNT) + STATION_COUNT) % STATION_COUNT;
     lv_label_set_text(s_lbl_station, STATIONS[s_browse_index].name);
 
-    // Fade out logo, decode new image in callback, then fade in
     lv_anim_delete(s_logo_container, anim_opa_cb);
     anim_fade(s_logo_container, anim_opa_cb,
               lv_obj_get_style_opa(s_logo_container, LV_PART_MAIN),
