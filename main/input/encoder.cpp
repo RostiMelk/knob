@@ -2,10 +2,10 @@
 #include "app_config.h"
 
 #include "driver/gpio.h"
-#include "esp_event.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 
+#include <atomic>
 #include <inttypes.h>
 
 static constexpr const char *TAG = "encoder";
@@ -21,6 +21,9 @@ static constexpr int POLL_INTERVAL_MS = 3; // Match Waveshare demo (3ms)
 static constexpr int DEBOUNCE_TICKS = 2;   // Consecutive readings before accept
 
 static esp_timer_handle_t s_poll_timer;
+
+// Atomic step accumulator — written by the poll timer, read by the UI task
+static std::atomic<int32_t> s_steps{0};
 
 // Per-channel state
 struct ChannelState {
@@ -62,17 +65,17 @@ static void on_poll(void *) {
   bool ccw = process_channel(static_cast<gpio_num_t>(PIN_ENC_B), s_chan_b);
 
   if (cw) {
-    int32_t steps = 1;
+    s_steps.fetch_add(1, std::memory_order_relaxed);
     ESP_LOGD(TAG, "step: CW (+1)");
-    esp_event_post(APP_EVENT, APP_EVENT_ENCODER_ROTATE, &steps, sizeof(steps),
-                   0);
   }
   if (ccw) {
-    int32_t steps = -1;
+    s_steps.fetch_sub(1, std::memory_order_relaxed);
     ESP_LOGD(TAG, "step: CCW (-1)");
-    esp_event_post(APP_EVENT, APP_EVENT_ENCODER_ROTATE, &steps, sizeof(steps),
-                   0);
   }
+}
+
+int32_t encoder_take_steps() {
+  return s_steps.exchange(0, std::memory_order_relaxed);
 }
 
 static void init_gpio() {
@@ -104,7 +107,8 @@ void encoder_init() {
   ESP_ERROR_CHECK(
       esp_timer_start_periodic(s_poll_timer, POLL_INTERVAL_MS * 1000LL));
 
-  ESP_LOGI(TAG,
-           "Encoder ready (A=%d B=%d, bidi-switch mode, poll=%dms, debounce=%d)",
-           PIN_ENC_A, PIN_ENC_B, POLL_INTERVAL_MS, DEBOUNCE_TICKS);
+  ESP_LOGI(
+      TAG,
+      "Encoder ready (A=%d B=%d, bidi-switch mode, poll=%dms, debounce=%d)",
+      PIN_ENC_A, PIN_ENC_B, POLL_INTERVAL_MS, DEBOUNCE_TICKS);
 }

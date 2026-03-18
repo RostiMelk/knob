@@ -2,6 +2,7 @@
 #include "app_config.h"
 #include "art_decoder.h"
 #include "fonts/fonts.h"
+#include "input/encoder.h"
 #include "input/haptic.h"
 #include "sonos/sonos.h"
 #include "storage/settings.h"
@@ -40,6 +41,8 @@ enum class Mode { Volume, Browse, Voice };
 
 static constexpr int BROWSE_TIMEOUT_MS = 7000;
 static constexpr int VOL_DISPLAY_MS = 1500;
+static constexpr int VOL_LOCAL_GRACE_MS = 2000;
+static constexpr int ENCODER_POLL_MS = 20;
 static constexpr int ANIM_FADE_MS = 200;
 static constexpr int ANIM_QUICK_MS = 100;
 static constexpr int ANIM_ARC_FADE_MS = 400;
@@ -118,6 +121,8 @@ static lv_obj_t *s_logo_container;
 // Volume arc (inside home page)
 static lv_obj_t *s_vol_arc;
 static lv_timer_t *s_vol_hide_timer;
+static int32_t s_arc_display_val; // Current animated arc position
+static uint32_t s_local_vol_ms;   // Timestamp of last local volume change
 
 // Browse timeout
 static lv_timer_t *s_browse_timer;
@@ -245,6 +250,7 @@ static void do_long_press();
 static void activate_voice();
 static void deactivate_voice();
 static void on_page_changed(int index, const char *id);
+static void on_encoder_poll(lv_timer_t *);
 
 // ─── Animation Helpers
 // ────────────────────────────────────────────────────────────────
@@ -259,6 +265,11 @@ static void anim_img_opa_cb(void *obj, int32_t v) {
 
 static void anim_arc_ind_opa_cb(void *obj, int32_t v) {
   lv_obj_set_style_arc_opa(static_cast<lv_obj_t *>(obj), v, LV_PART_INDICATOR);
+}
+
+static void anim_vol_arc_cb(void *obj, int32_t v) {
+  s_arc_display_val = v;
+  lv_arc_set_value(static_cast<lv_obj_t *>(obj), v);
 }
 
 static void anim_bg_opa_cb(void *obj, int32_t v) {
@@ -461,8 +472,12 @@ static void show_volume(int level) {
   backlight_poke();
   lv_anim_delete(s_vol_arc, anim_arc_ind_opa_cb);
   lv_obj_set_style_arc_opa(s_vol_arc, LV_OPA_COVER, LV_PART_INDICATOR);
-  lv_arc_set_value(s_vol_arc, level);
   lv_obj_set_style_arc_color(s_vol_arc, COL_ARC_ACTIVE, LV_PART_INDICATOR);
+
+  lv_anim_delete(s_vol_arc, anim_vol_arc_cb);
+  s_arc_display_val = level;
+  lv_arc_set_value(s_vol_arc, level);
+
   lv_timer_reset(s_vol_hide_timer);
   lv_timer_resume(s_vol_hide_timer);
 }
@@ -505,7 +520,8 @@ static void enter_browse() {
   }
 
   if (s_browse_index < 0) {
-    lv_label_set_text(s_lbl_subtitle, s_media.source[0] ? s_media.source : "Now playing");
+    lv_label_set_text(s_lbl_subtitle,
+                      s_media.source[0] ? s_media.source : "Now playing");
   } else {
     lv_label_set_text(s_lbl_subtitle, "Tap to play");
   }
@@ -521,6 +537,9 @@ static void enter_browse() {
   lv_obj_set_style_opa(s_lbl_position, LV_OPA_TRANSP, LV_PART_MAIN);
   anim_fade(s_lbl_position, anim_opa_cb, LV_OPA_TRANSP, LV_OPA_COVER,
             ANIM_QUICK_MS);
+
+  lv_anim_delete(s_vol_arc, anim_vol_arc_cb);
+  s_arc_display_val = s_volume;
 
   lv_obj_set_style_arc_color(s_vol_arc, COL_ARC_DIM, LV_PART_INDICATOR);
   lv_obj_set_style_arc_color(s_vol_arc, COL_ARC_BG, LV_PART_MAIN);
@@ -595,6 +614,9 @@ static void exit_browse() {
 
   lv_obj_set_style_arc_color(s_vol_arc, COL_ARC_ACTIVE, LV_PART_INDICATOR);
   lv_obj_set_style_arc_color(s_vol_arc, COL_ARC_BG, LV_PART_MAIN);
+
+  lv_arc_set_value(s_vol_arc, s_volume);
+  s_arc_display_val = s_volume;
 
   lv_timer_pause(s_browse_timer);
 }
@@ -807,6 +829,7 @@ static void home_page_build(lv_obj_t *parent) {
   lv_arc_set_bg_angles(s_vol_arc, 0, 270);
   lv_arc_set_range(s_vol_arc, VOLUME_MIN, VOLUME_MAX);
   lv_arc_set_value(s_vol_arc, s_volume);
+  s_arc_display_val = s_volume;
   lv_obj_remove_flag(s_vol_arc, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_set_style_arc_width(s_vol_arc, 6, LV_PART_MAIN);
   lv_obj_set_style_arc_color(s_vol_arc, COL_ARC_BG, LV_PART_MAIN);
@@ -841,6 +864,7 @@ static void home_page_build(lv_obj_t *parent) {
   lv_obj_set_style_text_color(s_lbl_clock, COL_TEXT, LV_PART_MAIN);
   lv_obj_set_style_text_font(s_lbl_clock, &geist_medium_52, LV_PART_MAIN);
   lv_obj_set_style_text_opa(s_lbl_clock, LV_OPA_90, LV_PART_MAIN);
+
   lv_label_set_text(s_lbl_clock, "00:00");
   lv_obj_align(s_lbl_clock, LV_ALIGN_CENTER, 0, -20);
 
@@ -1087,6 +1111,8 @@ void ui_init() {
         lv_timer_create(on_tap_delay, DOUBLE_TAP_WINDOW_MS, nullptr);
     lv_timer_pause(s_tap_delay_timer);
 
+    lv_timer_create(on_encoder_poll, ENCODER_POLL_MS, nullptr);
+
     voice_ui_build(s_screen);
 
     show_idle_ui(true);
@@ -1109,9 +1135,18 @@ void ui_init() {
 
 void ui_set_volume(int level) {
   if (display_lock(200)) {
+    if (lv_tick_elaps(s_local_vol_ms) < VOL_LOCAL_GRACE_MS) {
+      display_unlock();
+      return;
+    }
     if (level != s_volume) {
-      if (pages_is_home() && s_mode == Mode::Volume)
+      if (pages_is_home() && s_mode == Mode::Volume) {
         show_volume(level);
+      } else {
+        lv_anim_delete(s_vol_arc, anim_vol_arc_cb);
+        s_arc_display_val = level;
+        lv_arc_set_value(s_vol_arc, level);
+      }
       s_volume = level;
     }
     display_unlock();
@@ -1330,15 +1365,17 @@ bool ui_is_voice_active() { return s_mode == Mode::Voice; }
 static void on_page_changed(int index, const char *id) {
   (void)id;
   if (index == 0) {
+    lv_anim_delete(s_vol_arc, anim_vol_arc_cb);
+    lv_arc_set_value(s_vol_arc, s_volume);
+    s_arc_display_val = s_volume;
+
     show_idle_ui(home_should_idle());
     update_subtitle();
   }
 }
 
-void ui_on_encoder_rotate(int32_t steps) {
-  if (!display_lock(50))
-    return;
-
+// Core encoder logic — called from LVGL task context (no lock needed)
+static void handle_encoder(int32_t steps) {
   backlight_poke();
 
   if (s_on_picker) {
@@ -1348,20 +1385,15 @@ void ui_on_encoder_rotate(int32_t steps) {
                      s_discovered.count - 1);
       highlight_picker_item(s_speaker_highlight);
     }
-    display_unlock();
     return;
   }
 
-  if (s_mode == Mode::Voice) {
-    display_unlock();
+  if (s_mode == Mode::Voice)
     return;
-  }
 
-  // If we're on a live view page, encoder navigates between pages
   if (!pages_is_home()) {
     pages_navigate(steps > 0 ? 1 : -1);
     pages_poke();
-    display_unlock();
     return;
   }
 
@@ -1374,6 +1406,7 @@ void ui_on_encoder_rotate(int32_t steps) {
     if (raw < VOLUME_MIN || raw > VOLUME_MAX)
       haptic_buzz();
     show_volume(s_volume);
+    s_local_vol_ms = lv_tick_get();
     int32_t vol = s_volume;
     esp_event_post(APP_EVENT, APP_EVENT_VOLUME_CHANGED, &vol, sizeof(vol), 0);
     sonos_set_volume(s_volume);
@@ -1414,7 +1447,19 @@ void ui_on_encoder_rotate(int32_t steps) {
   case Mode::Voice:
     break;
   }
+}
 
+// LVGL timer — drains accumulated encoder steps in one shot
+static void on_encoder_poll(lv_timer_t *) {
+  int32_t steps = encoder_take_steps();
+  if (steps != 0)
+    handle_encoder(steps);
+}
+
+void ui_on_encoder_rotate(int32_t steps) {
+  if (!display_lock(50))
+    return;
+  handle_encoder(steps);
   display_unlock();
 }
 

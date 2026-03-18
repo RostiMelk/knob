@@ -1,7 +1,7 @@
 /*******************************************************************************
  * Size: 52 px
  * Bpp: 4
- * Opts: --bpp 4 --size 52 --font /tmp/geist-fonts/Geist-Medium-Tabular.ttf --range 0x20-0x3A --format lvgl --no-compress --lv-include lvgl.h -o /home/daytona/radio/main/fonts/geist_medium_52.c
+ * Opts: --bpp 4 --size 52 --font /tmp/geist-extracted/geist-font-1.8.0/fonts/Geist/ttf/Geist-Medium.ttf --range 0x20-0x3A --format lvgl --no-compress --lv-include lvgl.h -o main/fonts/geist_medium_52.c
  ******************************************************************************/
 
 #ifdef LV_LVGL_H_INCLUDE_SIMPLE
@@ -1344,15 +1344,15 @@ static const lv_font_fmt_txt_glyph_dsc_t glyph_dsc[] = {
     {.bitmap_index = 4006, .adv_w = 177, .box_w = 7, .box_h = 7, .ofs_x = 2, .ofs_y = 0},
     {.bitmap_index = 4031, .adv_w = 411, .box_w = 22, .box_h = 45, .ofs_x = 1, .ofs_y = -6},
     {.bitmap_index = 4526, .adv_w = 560, .box_w = 31, .box_h = 39, .ofs_x = 2, .ofs_y = -1},
-    {.bitmap_index = 5131, .adv_w = 560, .box_w = 14, .box_h = 37, .ofs_x = 2, .ofs_y = 0},
-    {.bitmap_index = 5390, .adv_w = 560, .box_w = 27, .box_h = 38, .ofs_x = 3, .ofs_y = 0},
-    {.bitmap_index = 5903, .adv_w = 560, .box_w = 28, .box_h = 39, .ofs_x = 2, .ofs_y = -1},
-    {.bitmap_index = 6449, .adv_w = 560, .box_w = 30, .box_h = 37, .ofs_x = 1, .ofs_y = 0},
-    {.bitmap_index = 7004, .adv_w = 560, .box_w = 28, .box_h = 38, .ofs_x = 3, .ofs_y = -1},
-    {.bitmap_index = 7536, .adv_w = 560, .box_w = 28, .box_h = 39, .ofs_x = 2, .ofs_y = -1},
-    {.bitmap_index = 8082, .adv_w = 560, .box_w = 27, .box_h = 37, .ofs_x = 1, .ofs_y = 0},
-    {.bitmap_index = 8582, .adv_w = 560, .box_w = 30, .box_h = 39, .ofs_x = 1, .ofs_y = -1},
-    {.bitmap_index = 9167, .adv_w = 560, .box_w = 29, .box_h = 39, .ofs_x = 1, .ofs_y = -1},
+    {.bitmap_index = 5131, .adv_w = 338, .box_w = 14, .box_h = 37, .ofs_x = 2, .ofs_y = 0},
+    {.bitmap_index = 5390, .adv_w = 524, .box_w = 27, .box_h = 38, .ofs_x = 3, .ofs_y = 0},
+    {.bitmap_index = 5903, .adv_w = 520, .box_w = 28, .box_h = 39, .ofs_x = 2, .ofs_y = -1},
+    {.bitmap_index = 6449, .adv_w = 523, .box_w = 30, .box_h = 37, .ofs_x = 1, .ofs_y = 0},
+    {.bitmap_index = 7004, .adv_w = 533, .box_w = 28, .box_h = 38, .ofs_x = 3, .ofs_y = -1},
+    {.bitmap_index = 7536, .adv_w = 503, .box_w = 28, .box_h = 39, .ofs_x = 2, .ofs_y = -1},
+    {.bitmap_index = 8082, .adv_w = 442, .box_w = 27, .box_h = 37, .ofs_x = 1, .ofs_y = 0},
+    {.bitmap_index = 8582, .adv_w = 519, .box_w = 30, .box_h = 39, .ofs_x = 1, .ofs_y = -1},
+    {.bitmap_index = 9167, .adv_w = 504, .box_w = 29, .box_h = 39, .ofs_x = 1, .ofs_y = -1},
     {.bitmap_index = 9733, .adv_w = 251, .box_w = 8, .box_h = 26, .ofs_x = 4, .ofs_y = 0}
 };
 

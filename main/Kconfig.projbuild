@@ -25,7 +25,7 @@ menu "Sonos Radio"
 
     config RADIO_SONOS_POLL_INTERVAL_MS
         int "Sonos state poll interval (ms)"
-        default 5000
+        default 2000
         range 1000 30000
 
     config RADIO_VOLUME_DEFAULT

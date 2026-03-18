@@ -34,11 +34,6 @@ static int s_volume;
 static int s_station_index;
 static esp_timer_handle_t s_timer_tick_handle;
 
-static void on_encoder_rotate(void *, esp_event_base_t, int32_t, void *data) {
-  auto delta = *static_cast<int32_t *>(data);
-  ui_on_encoder_rotate(delta);
-}
-
 static void on_station_changed(void *, esp_event_base_t, int32_t, void *data) {
   auto index = *static_cast<int32_t *>(data);
   if (index < 0 || index >= STATION_COUNT)
@@ -222,8 +217,6 @@ static void init_nvs() {
 static void register_events() {
   esp_event_loop_create_default();
 
-  esp_event_handler_register(APP_EVENT, APP_EVENT_ENCODER_ROTATE,
-                             on_encoder_rotate, nullptr);
   esp_event_handler_register(APP_EVENT, APP_EVENT_STATION_CHANGED,
                              on_station_changed, nullptr);
   esp_event_handler_register(APP_EVENT, APP_EVENT_VOLUME_CHANGED,
