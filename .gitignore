@@ -1,18 +1,32 @@
-build/
-sim/build/
+# Build artifacts (per-app)
+apps/*/build/
+apps/*/sdkconfig
+apps/*/sdkconfig.old
+apps/*/managed_components/
+apps/*/dependencies.lock
+
+# Component managed deps
+components/*/managed_components/
+components/*/dependencies.lock
+
+# Secrets
 .env
-sdkconfig
-sdkconfig.old
 sdkconfig.defaults.local
-managed_components/
-dependencies.lock
-__pycache__/
-*.pyc
+apps/*/sdkconfig.defaults.local
+
+# IDE / cache
 .vscode/
 .cache/
+__pycache__/
+*.pyc
+
+# Build intermediates
 *.o
 *.d
 *.map
 *.bin
 *.elf
 *.log
+
+# Simulator
+sim/build/

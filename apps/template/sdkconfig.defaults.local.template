@@ -1,0 +1,5 @@
+# Local secrets — copy to sdkconfig.defaults.local and fill in values
+# This file is gitignored. Never commit real credentials.
+
+CONFIG_RADIO_WIFI_SSID="your_wifi_ssid"
+CONFIG_RADIO_WIFI_PASSWORD="your_wifi_password"

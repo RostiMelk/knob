@@ -29,7 +29,7 @@ The ST77916 is a 360×360 round QSPI LCD. These constraints have caused boot loo
 
 ### Initialization
 
-`display_idf.cpp` uses **field-by-field assignment** for `esp_lvgl_port` structs. C++20 designated initializers cause order mismatch with these structs — do not refactor to use them.
+`components/knob_hal/src/display_idf.cpp` uses **field-by-field assignment** for `esp_lvgl_port` structs. C++20 designated initializers cause order mismatch with these structs — do not refactor to use them.
 
 ---
 
@@ -56,9 +56,9 @@ The ST77916 is a 360×360 round QSPI LCD. These constraints have caused boot loo
 3. Delete sdkconfig: `rm sdkconfig`
 4. Full clean: `idf.py fullclean`
 5. Rebuild: `idf.py build`
-6. **Verify**: `grep LV_USE_CLIB_MALLOC build/config/sdkconfig.h`
+6. **Verify**: `grep LV_USE_CLIB_MALLOC apps/<app>/build/config/sdkconfig.h`
 
-Always verify Kconfig changes actually took effect — choices silently revert.
+Always verify Kconfig changes actually took effect — choices silently revert. The build output lives under `apps/<app>/build/` (e.g. `apps/radio/build/config/sdkconfig.h`).
 
 ---
 
@@ -82,7 +82,7 @@ DRV2605 motor driver on the shared I2C bus (400 kHz). Used for tactile feedback 
 
 ### Serial log capture (no interactive terminal)
 
-`idf.py monitor` requires an interactive TTY. From an agent or script, capture serial output to `serial.log`:
+`idf.py monitor` requires an interactive TTY. From an agent or script, run from the app directory (e.g. `apps/radio/`) and capture serial output to `serial.log`:
 
 ```python
 python3 -c "
@@ -104,7 +104,7 @@ s.close()
 
 ## Pin Assignments
 
-All pin definitions live in `main/app_config.h`. Before changing any pin:
+All hardware pin definitions live in `components/knob_hal/include/hal_pins.h` — this is the single source of truth. Before changing any pin:
 
 1. Verify against `docs/hardware.md` (full pin map with GPIO tables)
 2. Check for I2C bus conflicts (touch + haptic share the bus)

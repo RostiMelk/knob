@@ -6,14 +6,52 @@ You're modifying Sonos playback, volume control, speaker discovery, or the polli
 
 ---
 
+## Architecture
+
+Sonos functionality lives in the **`knob_sonos`** shared component (`components/knob_sonos/`). It is app-agnostic — any app in the monorepo can link against it. The radio app registers its station list at init via `sonos_set_stations()`.
+
+---
+
 ## Key Files
 
-| File | Purpose |
-|------|---------|
-| `main/sonos/sonos.cpp` | UPnP/SOAP HTTP client (AVTransport + RenderingControl) |
-| `main/sonos/sonos.h` | Public API: `sonos_play_uri()`, `sonos_set_volume()`, etc. |
-| `main/sonos/discovery.cpp` | SSDP multicast speaker discovery |
-| `docs/sonos-upnp.md` | Complete SOAP envelope templates for every command |
+| File                                           | Purpose                                                                            |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `components/knob_sonos/src/sonos.cpp`          | UPnP/SOAP HTTP client (AVTransport + RenderingControl)                             |
+| `components/knob_sonos/include/sonos.h`        | Public API: `sonos_play_uri()`, `sonos_set_volume()`, `sonos_set_stations()`, etc. |
+| `components/knob_sonos/src/discovery.cpp`      | SSDP multicast speaker discovery                                                   |
+| `components/knob_sonos/include/sonos_config.h` | Constants (`SONOS_PORT`, etc.) and event IDs (`APP_EVENT_STATION_CHANGED`, etc.)   |
+| `apps/radio/stations.json`                     | Station URLs and metadata for the radio app                                        |
+| `docs/sonos-upnp.md`                           | Complete SOAP envelope templates for every command                                 |
+
+### What moved
+
+| Old path                   | New path                                  |
+| -------------------------- | ----------------------------------------- |
+| `main/sonos/sonos.cpp`     | `components/knob_sonos/src/sonos.cpp`     |
+| `main/sonos/sonos.h`       | `components/knob_sonos/include/sonos.h`   |
+| `main/sonos/discovery.cpp` | `components/knob_sonos/src/discovery.cpp` |
+| `stations.json`            | `apps/radio/stations.json`                |
+
+### What moved between headers
+
+- Sonos event IDs (`APP_EVENT_STATION_CHANGED`, etc.) now live in `sonos_config.h`, **not** `app_config.h`.
+- Sonos constants (`SONOS_PORT`, etc.) also in `sonos_config.h`.
+
+---
+
+## Using knob_sonos from an App
+
+Apps depend on `knob_sonos` like any ESP-IDF component. At init, the app registers its station list:
+
+```c
+#include "sonos.h"
+
+// App startup
+sonos_set_stations(my_stations, my_station_count);
+sonos_init();
+```
+
+`sonos_set_stations()` must be called before `sonos_init()`. The component does not own or embed any station data — the app provides it.
 
 ---
 
@@ -46,7 +84,7 @@ Commands are HTTP POST requests with SOAP XML bodies to port 1400 on the speaker
 
 Since Sonos firmware v6.4.2+, internet radio streams must use the `x-rincon-mp3radio://` URI prefix. Without it, Sonos silently refuses to play.
 
-Stream URLs in `stations.json` use `https://`. The firmware prepends the prefix before sending to Sonos.
+Stream URLs in `apps/radio/stations.json` use `https://`. The firmware prepends the prefix before sending to Sonos.
 
 ### Stereo pairs
 
@@ -54,7 +92,7 @@ In a stereo pair, the right channel has `Invisible='1'` in SSDP responses. All c
 
 ### HTTP event queue
 
-`CONFIG_ESP_SYSTEM_EVENT_TASK_QUEUE_SIZE=64` (default 32 overflows from Sonos HTTP polling combined with WiFi events). If you see events being dropped, check this config value.
+`CONFIG_ESP_SYSTEM_EVENT_TASK_QUEUE_SIZE=64` (default 32 overflows from Sonos HTTP polling combined with WiFi events). If you see events being dropped, check this config value. The `sdkconfig` lives per-app under `apps/radio/`.
 
 ---
 
@@ -62,12 +100,12 @@ In a stereo pair, the right channel has `Invisible='1'` in SSDP responses. All c
 
 SSDP multicast scan runs once on first boot. Behavior:
 
-| Scenario | Action |
-|----------|--------|
-| One speaker found | Auto-selected, saved to NVS |
-| Multiple speakers | User picks from a list (encoder scroll, touch select) |
-| No speakers | Retry with backoff |
-| `SPEAKER_IP` in `.env` | Skip discovery, use override |
+| Scenario                                                      | Action                                                |
+| ------------------------------------------------------------- | ----------------------------------------------------- |
+| One speaker found                                             | Auto-selected, saved to NVS                           |
+| Multiple speakers                                             | User picks from a list (encoder scroll, touch select) |
+| No speakers                                                   | Retry with backoff                                    |
+| `CONFIG_RADIO_SONOS_SPEAKER_IP` in `sdkconfig.defaults.local` | Skip discovery, use override                          |
 
 The selected speaker IP is persisted to NVS. Subsequent boots reconnect immediately without discovery.
 
@@ -102,7 +140,7 @@ See `docs/sonos-upnp.md` for the complete set of SOAP envelopes (SetAVTransportU
 
 **Volume commands ignored**: You may be sending to the wrong speaker in a stereo pair. Verify you're targeting the coordinator IP (the one without `Invisible='1'`).
 
-**Event queue overflow** (`ESP_ERR_TIMEOUT` from `esp_event_post`): Increase `CONFIG_ESP_SYSTEM_EVENT_TASK_QUEUE_SIZE` in sdkconfig. The Sonos polling loop + WiFi events + UI events can exceed 32 slots.
+**Event queue overflow** (`ESP_ERR_TIMEOUT` from `esp_event_post`): Increase `CONFIG_ESP_SYSTEM_EVENT_TASK_QUEUE_SIZE` in the app's sdkconfig (`apps/radio/sdkconfig`). The Sonos polling loop + WiFi events + UI events can exceed 32 slots.
 
 ---
 

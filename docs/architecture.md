@@ -1,18 +1,53 @@
 # Architecture
 
+## Monorepo Component Architecture
+
+The project is structured as a monorepo with shared components and per-app entry points.
+
+```
+components/              Shared ESP-IDF components (reusable across apps)
+  knob_hal/              Display, touch, encoder, backlight (hardware abstraction)
+  knob_ui/               LVGL core setup, shared UI utilities
+  knob_net/              WiFi STA management, reconnect logic
+  knob_sonos/            Sonos UPnP/SOAP client + SSDP discovery
+  knob_storage/          NVS persistence
+  knob_events/           Shared event base and event IDs (knob_events.h)
+  knob_voice/            Voice mode (OpenAI Realtime API)
+
+apps/radio/              Radio application
+  main/
+    main.cpp             App entry point
+    app_config.h         Radio-specific config (station list, UI tuning)
+    ui/                  Radio-specific LVGL screens and state machine
+  CMakeLists.txt         Pulls in required components via REQUIRES
+```
+
+Each app declares which components it needs in its `CMakeLists.txt`. Components never depend on apps — dependencies point strictly downward. A new app (e.g., a voice-only controller) can pick a different subset of components without touching the shared code.
+
+Shared configuration lives in component headers:
+
+| Header           | Component   | Contents                                      |
+| ---------------- | ----------- | --------------------------------------------- |
+| `hal_pins.h`     | knob_hal    | GPIO pin assignments, display/touch/encoder   |
+| `knob_events.h`  | knob_events | Event base, event IDs, event data structs     |
+| `sonos_config.h` | knob_sonos  | Sonos polling intervals, timeouts             |
+| `voice_config.h` | knob_voice  | Voice mode parameters, OpenAI config          |
+| `app_config.h`   | apps/radio  | Station list, UI colors, radio-specific knobs |
+
 ## Module Dependency Graph
 
 ```
-main.cpp
-  ├── storage/settings    NVS persistence (wifi creds, station index, volume, speaker IP)
-  ├── net/wifi_manager    STA connect, reconnect, event emission
-  ├── sonos/sonos         UPnP/SOAP HTTP client (AVTransport + RenderingControl)
-  ├── sonos/discovery     SSDP multicast speaker discovery
-  ├── input/encoder       Rotary encoder via PCNT (no button — rotation only)
-  └── ui/ui               LVGL screens, state machine, display+touch init
+apps/radio/main/main.cpp
+  ├── knob_storage          NVS persistence (wifi creds, station index, volume, speaker IP)
+  ├── knob_net              STA connect, reconnect, event emission
+  ├── knob_sonos            UPnP/SOAP HTTP client + SSDP speaker discovery
+  ├── knob_hal              Rotary encoder via PCNT, display, touch init
+  ├── knob_ui               LVGL core setup and shared UI utilities
+  ├── knob_events           Shared event bus (APP_EVENT base + IDs)
+  └── apps/radio/main/ui/   Radio-specific screens and state machine
 ```
 
-Modules are peers. They never call each other directly. All cross-module communication goes through `esp_event`.
+Components are peers. They never call each other directly. All cross-component communication goes through `esp_event`, with event IDs defined in `knob_events.h`.
 
 ## Event Flow
 
@@ -34,7 +69,7 @@ Modules are peers. They never call each other directly. All cross-module communi
 
 The encoder has **no push button** (rotation only, 2 pins). All selection is via the touchscreen. Single screen with two modes — no screen transitions.
 
-Custom event base: `APP_EVENT` declared in `main.cpp`, shared via `app_config.h`.
+Custom event base: `APP_EVENT` declared in `knob_events.h` (knob_events component), shared across all components and apps.
 
 ## Task Model
 
@@ -68,18 +103,17 @@ LVGL configured with 2 partial draw buffers in internal DMA-capable RAM. Display
 ## Boot Sequence
 
 ```
-app_main()
-  1. settings_init()          Load NVS config
-  2. settings_load_config_from_sd()  Read .env from SD card → NVS (if present)
-  3. ui_init()                Init display, touch, LVGL, show splash
-  4. encoder_init()           Configure PCNT (rotation only, no button)
-  5. discovery_init()         Prepare SSDP
-  6. sonos_init()             Create command queue
-  7. wifi_manager_init()      Start STA connection (async)
+app_main()                              (apps/radio/main/main.cpp)
+  1. settings_init()                    Load NVS config (knob_storage)
+  2. ui_init()                          Init display, touch, LVGL, show splash (knob_hal + knob_ui + radio ui/)
+  3. encoder_init()                     Configure PCNT, rotation only (knob_hal)
+  4. discovery_init()                   Prepare SSDP (knob_sonos)
+  5. sonos_init()                       Create command queue (knob_sonos)
+  6. wifi_manager_init()                Start STA connection, async (knob_net)
        ├── on connect + saved speaker  ──► sonos_start() + play
        ├── on connect + no speaker     ──► SSDP scan → picker or auto-select
        └── on fail                     ──► retry with backoff
-  8. Scheduler takes over
+  7. Scheduler takes over
 ```
 
 ## Sonos Interaction Model
@@ -101,7 +135,7 @@ app_main()
         Post SONOS_STATE event if changed
 ```
 
-Speaker is discovered via SSDP on first boot. If one speaker found, auto-selected. If multiple, user picks from a list. Selection saved to NVS — subsequent boots reconnect immediately. `SPEAKER_IP` in `.env` is an optional override.
+Speaker is discovered via SSDP on first boot. If one speaker found, auto-selected. If multiple, user picks from a list. Selection saved to NVS — subsequent boots reconnect immediately. `CONFIG_RADIO_SONOS_SPEAKER_IP` in `sdkconfig.defaults.local` is an optional override.
 
 ## Single-Screen UX
 

@@ -23,7 +23,7 @@ Prefer posting an `esp_event` and letting the UI task handle it on the next tick
 
 ## Display Driver
 
-The display driver lives in `main/ui/display_idf.cpp`. It initializes the ST77916 QSPI panel and CST816S touch controller, then sets up `esp_lvgl_port`.
+The display driver lives in `components/knob_hal/src/display_idf.cpp`. It initializes the ST77916 QSPI panel and CST816S touch controller, then sets up `esp_lvgl_port`.
 
 ### Critical rules
 
@@ -40,11 +40,13 @@ See `skills/hardware.md` for deeper display and memory constraints.
 
 ## Page System
 
-The horizontal pager in `main/ui/ui_pages.cpp` manages multiple full-screen pages with slide animations.
+The horizontal pager in `components/knob_ui/src/ui_pages.cpp` manages multiple full-screen pages with slide animations.
+
+> **Shared component:** `ui_pages.cpp` lives in the `knob_ui` component, so the page system is reusable by any app built on this hardware. App-specific pages (timer, voice, home screen) live in the app's own `main/ui/` directory (e.g., `apps/radio/main/ui/`).
 
 ### Adding a new page
 
-1. Create `main/ui/ui_mypage.cpp` + `main/ui/ui_mypage.h`
+1. Create `apps/radio/main/ui/ui_mypage.cpp` + `apps/radio/main/ui/ui_mypage.h`
 2. Define a `PageDef` with build/destroy/tick callbacks:
 
 ```cpp
@@ -61,23 +63,23 @@ static const PageDef my_page_def = {
 ```
 
 3. Register with `pages_add(&my_page_def, priority)` — priority determines slide position relative to home
-4. Add the `.cpp` file to `main/CMakeLists.txt` SRCS
+4. Add the `.cpp` file to `apps/radio/main/CMakeLists.txt` SRCS
 
 Pages auto-slide via the pager. The home screen is the default; other pages are to the left or right based on priority.
 
-### Existing pages
+### Existing pages (radio app)
 
-| Page | File | Position |
-|------|------|----------|
-| Home | `ui.cpp` | Center (default) |
-| Timer | `ui_timer.cpp` | Right of home |
-| Voice | `ui_voice.cpp` | Overlay (not in pager) |
+| Page  | File                              | Position               |
+| ----- | --------------------------------- | ---------------------- |
+| Home  | `apps/radio/main/ui/ui.cpp`       | Center (default)       |
+| Timer | `apps/radio/main/ui/ui_timer.cpp` | Right of home          |
+| Voice | `apps/radio/main/ui/ui_voice.cpp` | Overlay (not in pager) |
 
 ---
 
 ## Home Screen Modes
 
-The home screen (`main/ui/ui.cpp`) is a single-screen state machine with two primary modes:
+The home screen (`apps/radio/main/ui/ui.cpp`) is a single-screen state machine with two primary modes:
 
 ```
 VOLUME MODE (default)
@@ -100,47 +102,47 @@ Images are compiled into firmware as C arrays. No filesystem, no file I/O — ev
 
 ### Image specs
 
-| Type | Size | Format | Compression |
-|------|------|--------|-------------|
-| Station logos | 120×120 | RGB565A8 | LZ4 |
-| Backgrounds | Solid color from `Station::color` | Runtime fill | None |
+| Type          | Size                              | Format       | Compression |
+| ------------- | --------------------------------- | ------------ | ----------- |
+| Station logos | 120×120                           | RGB565A8     | LZ4         |
+| Backgrounds   | Solid color from `Station::color` | Runtime fill | None        |
 
 ### Image pipeline
 
 ```
-stations.json
-  → bun scripts/gen_stations.ts
-    → downloads logos → assets/logos/*.png (120×120)
-    → patches STATIONS[] in main/app_config.h
+apps/radio/stations.json
+  → bun apps/radio/scripts/gen_stations.ts
+    → downloads logos → apps/radio/assets/logos/*.png (120×120)
+    → patches STATIONS[] in apps/radio/main/app_config.h
 
-assets/logos/*.png
-  → ./scripts/convert_images.sh
+apps/radio/assets/logos/*.png
+  → ./apps/radio/scripts/convert_images.sh
     → LVGLImage.py (--cf RGB565A8 --compress LZ4 --premultiply --ofmt C)
-    → main/ui/images/*.c (~4 KB each compressed)
+    → apps/radio/main/ui/images/*.c (~4 KB each compressed)
 ```
 
 ### Adding a station logo
 
-1. Add entry to `stations.json`
-2. Run `bun scripts/gen_stations.ts` — downloads logo, patches `app_config.h`
-3. Run `./scripts/convert_images.sh` — generates C array
-4. Add the new `.c` file to `main/CMakeLists.txt` SRCS
-5. Add `LV_IMAGE_DECLARE(station_id);` to `main/ui/images/images.h`
-6. Add `&station_id` to the `s_logos[]` array in `main/ui/ui.cpp` (must match `STATIONS[]` order)
+1. Add entry to `apps/radio/stations.json`
+2. Run `bun apps/radio/scripts/gen_stations.ts` — downloads logo, patches `app_config.h`
+3. Run `./apps/radio/scripts/convert_images.sh` — generates C array
+4. Add the new `.c` file to `apps/radio/main/CMakeLists.txt` SRCS
+5. Add `LV_IMAGE_DECLARE(station_id);` to `apps/radio/main/ui/images/images.h`
+6. Add `&station_id` to the `s_logos[]` array in `apps/radio/main/ui/ui.cpp` (must match `STATIONS[]` order)
 
 ### Image rendering details
 
 - **Premultiplied alpha** saves one multiply-per-pixel during blending.
 - **Image cache**: 1 MB in PSRAM for decoded logo images.
 - **Background crossfade**: two-layer opacity animation on station confirm (250ms).
-- To re-download all logos: `bun scripts/gen_stations.ts --force`
-- To skip patching app_config.h: `bun scripts/gen_stations.ts --no-cpp`
+- To re-download all logos: `bun apps/radio/scripts/gen_stations.ts --force`
+- To skip patching app_config.h: `bun apps/radio/scripts/gen_stations.ts --no-cpp`
 
 ---
 
 ## Fonts
 
-LVGL font `.c` files live in `main/fonts/`, generated via `lv_font_conv`. They're compiled into firmware like images.
+LVGL font `.c` files live in `apps/radio/main/fonts/` (app-specific assets). Font declarations shared across apps are in `components/knob_ui/include/fonts.h`. Fonts are generated via `lv_font_conv` and compiled into firmware like images.
 
 Font files >50 KB cannot be pushed via some worker tools — use sandbox git if needed.
 
@@ -157,17 +159,28 @@ Font files >50 KB cannot be pushed via some worker tools — use sandbox git if 
 
 ## Key Files
 
-| File | Purpose |
-|------|---------|
-| `main/ui/ui.cpp` | Home screen, mode state machine, logo array |
-| `main/ui/ui_pages.cpp` | Horizontal pager, slide animations |
-| `main/ui/ui_timer.cpp` | Timer page |
-| `main/ui/ui_voice.cpp` | Voice mode overlay |
-| `main/ui/display_idf.cpp` | ST77916 QSPI + CST816S init, LVGL port setup |
-| `main/ui/images/` | Station logo C arrays |
-| `main/ui/images/images.h` | `LV_IMAGE_DECLARE` for all logos |
-| `main/fonts/` | LVGL font .c files |
-| `main/app_config.h` | Station list, colors, pin defs |
+### Shared (components)
+
+| File                                      | Purpose                                      |
+| ----------------------------------------- | -------------------------------------------- |
+| `components/knob_hal/src/display_idf.cpp` | ST77916 QSPI + CST816S init, LVGL port setup |
+| `components/knob_hal/include/hal_pins.h`  | Pin definitions, LCD constants               |
+| `components/knob_ui/src/ui_pages.cpp`     | Horizontal pager, slide animations           |
+| `components/knob_ui/include/fonts.h`      | Shared font declarations                     |
+
+### Radio-specific (apps/radio)
+
+| File                                 | Purpose                                      |
+| ------------------------------------ | -------------------------------------------- |
+| `apps/radio/main/ui/ui.cpp`          | Home screen, mode state machine, logo array  |
+| `apps/radio/main/ui/ui_timer.cpp`    | Timer page                                   |
+| `apps/radio/main/ui/ui_voice.cpp`    | Voice mode overlay                           |
+| `apps/radio/main/ui/images/`         | Station logo C arrays                        |
+| `apps/radio/main/ui/images/images.h` | `LV_IMAGE_DECLARE` for all logos             |
+| `apps/radio/main/fonts/`             | LVGL font .c files                           |
+| `apps/radio/main/app_config.h`       | Station list, colors                         |
+| `apps/radio/main/CMakeLists.txt`     | App build config, SRCS list                  |
+| `apps/radio/stations.json`           | Station definitions (name, URL, logo, color) |
 
 ---
 

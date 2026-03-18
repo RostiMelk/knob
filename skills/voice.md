@@ -8,7 +8,9 @@ You're working on voice mode: the WebSocket connection to OpenAI, PDM mic captur
 
 ## Overview
 
-Voice mode lets the user talk to an AI assistant that can control the radio. Double-tap the screen to enter voice mode, speak naturally, and the assistant responds with audio while executing tool calls (change station, set volume, set timer, etc.).
+Voice mode lets the user talk to an AI assistant that can control the device. Double-tap the screen to enter voice mode, speak naturally, and the assistant responds with audio while executing tool calls (change station, set volume, set timer, etc.).
+
+Voice is a **shared component** (`components/knob_voice/`) — any knob app can use voice mode by defining its own tools and UI. The radio app provides radio-specific tool definitions and a voice overlay screen.
 
 **Protocol:** OpenAI Realtime API over WebSocket (wss://api.openai.com/v1/realtime)
 **Audio in:** PDM mic → PCM16 mono 24 kHz → base64 → WebSocket
@@ -19,24 +21,39 @@ Voice mode lets the user talk to an AI assistant that can control the radio. Dou
 
 ## Module Structure
 
-```
-main/voice/
-  voice_task.cpp      WebSocket connection, event loop, session management
-  voice_audio.cpp     PDM mic capture → ring buffer → base64 encoding
-  voice_tools.cpp     Tool-call dispatch (station, volume, timer commands)
+Voice is split between shared infrastructure and app-specific code:
 
-main/ui/
-  ui_voice.cpp        Voice overlay UI (orb animation, state indicators)
 ```
+components/knob_voice/              ← shared component, reusable across apps
+  include/
+    voice_config.h                  VoiceState enum, task constants, event IDs
+  src/
+    voice_task.cpp                  WebSocket connection, event loop, session management
+    voice_audio.cpp                 PDM mic capture → ring buffer → base64 encoding
+    voice_tools.cpp                 Tool-call dispatch framework
+    voice_mic.cpp                   Mic peripheral setup and capture task
+    voice_protocol.cpp              Realtime API message serialization/parsing
+    voice_session.cpp               Session lifecycle (connect, configure, teardown)
+
+apps/radio/main/                    ← app-specific voice code
+  voice/
+    tools_radio.cpp                 Radio-specific tool definitions (station, volume, timer)
+  ui/
+    ui_voice.cpp                    Voice overlay UI (orb animation, state indicators)
+```
+
+Other knob apps reuse `knob_voice` but provide their own `tools_*.cpp` and `ui_voice.cpp`.
 
 ### Key Events
 
-| Event                  | Direction       | Purpose                              |
-| ---------------------- | --------------- | ------------------------------------ |
-| `VOICE_START`          | UI → voice_task | Double-tap detected, start session   |
-| `VOICE_STOP`           | UI → voice_task | User dismissed voice mode            |
-| `VOICE_STATE_CHANGED`  | voice_task → UI | State transition (connecting, listening, speaking, etc.) |
-| `VOICE_TOOL_RESULT`    | voice_tools → voice_task | Tool call completed, send result back |
+| Event                 | Direction                | Purpose                                                  |
+| --------------------- | ------------------------ | -------------------------------------------------------- |
+| `VOICE_START`         | UI → voice_task          | Double-tap detected, start session                       |
+| `VOICE_STOP`          | UI → voice_task          | User dismissed voice mode                                |
+| `VOICE_STATE_CHANGED` | voice_task → UI          | State transition (connecting, listening, speaking, etc.) |
+| `VOICE_TOOL_RESULT`   | voice_tools → voice_task | Tool call completed, send result back                    |
+
+Event IDs and `VoiceState` are defined in `components/knob_voice/include/voice_config.h`.
 
 ---
 
@@ -68,26 +85,26 @@ main/ui/
 
 ### Key server events to handle
 
-| Event | Action |
-|-------|--------|
-| `response.audio.delta` | Decode base64, write PCM16 to I2S DAC |
-| `response.audio.done` | Flush audio buffer |
+| Event                                   | Action                                   |
+| --------------------------------------- | ---------------------------------------- |
+| `response.audio.delta`                  | Decode base64, write PCM16 to I2S DAC    |
+| `response.audio.done`                   | Flush audio buffer                       |
 | `response.function_call_arguments.done` | Parse tool call, dispatch to voice_tools |
-| `input_audio_buffer.speech_started` | Cancel any playing response audio |
-| `input_audio_buffer.speech_stopped` | VAD detected end of speech |
-| `error` | Log and potentially reconnect |
+| `input_audio_buffer.speech_started`     | Cancel any playing response audio        |
+| `input_audio_buffer.speech_stopped`     | VAD detected end of speech               |
+| `error`                                 | Log and potentially reconnect            |
 
 ### Tool calls
 
 Tools are defined in the session config and executed locally. The flow:
 
 1. Server sends `response.function_call_arguments.done` with tool name + args JSON
-2. `voice_tools.cpp` parses and dispatches (e.g., `change_station`, `set_volume`, `set_timer`)
+2. `voice_tools.cpp` parses and dispatches to the app-specific tool handler (e.g., `tools_radio.cpp`)
 3. Execute the action via esp_event (same as encoder/touch would)
 4. Send `conversation.item.create` with tool result
 5. Send `response.create` to prompt the assistant to continue
 
-**Never call Sonos or UI directly from voice_tools.** Post events and let the existing handlers do their job.
+**Never call Sonos or UI directly from tool handlers.** Post events and let the existing handlers do their job.
 
 ---
 
@@ -96,9 +113,9 @@ Tools are defined in the session config and executed locally. The flow:
 ### Mic capture (PDM → PCM16)
 
 - PDM mic on I2S peripheral, configured for 24 kHz mono
-- Capture runs in a dedicated FreeRTOS task when voice mode is active
+- Capture runs in a dedicated FreeRTOS task when voice mode is active (`voice_mic.cpp`)
 - Raw samples written to a ring buffer (`xRingbufferSend`)
-- A separate encoding loop reads from the ring buffer, base64-encodes chunks, and sends via WebSocket
+- A separate encoding loop reads from the ring buffer, base64-encodes chunks, and sends via WebSocket (`voice_audio.cpp`)
 - Chunk size: ~4800 bytes (100ms of audio at 24 kHz, 16-bit)
 
 ### DAC playback (PCM16 → I2S)
@@ -110,6 +127,7 @@ Tools are defined in the session config and executed locally. The flow:
 ### Volume ducking
 
 When voice mode activates:
+
 1. Store current Sonos volume
 2. Duck Sonos to ~20% (or mute)
 3. On voice mode exit, restore original volume
@@ -120,17 +138,17 @@ This happens via the existing `sonos_set_volume()` path.
 
 ## Voice UI (ui_voice.cpp)
 
-The voice overlay renders on top of whatever page is active. It does NOT replace the current screen.
+The voice overlay renders on top of whatever page is active. It does NOT replace the current screen. This file is app-specific — each app provides its own voice UI in `apps/<app>/main/ui/ui_voice.cpp`.
 
 ### States
 
-| State | Visual | Meaning |
-|-------|--------|---------|
-| `CONNECTING` | Pulsing dim orb | WebSocket connecting |
-| `LISTENING` | Calm breathing orb | Mic active, waiting for speech |
-| `THINKING` | Spinning orb | Processing user input |
-| `SPEAKING` | Pulsing bright orb | Assistant audio playing |
-| `ERROR` | Red flash, then dismiss | Connection or API error |
+| State        | Visual                  | Meaning                        |
+| ------------ | ----------------------- | ------------------------------ |
+| `CONNECTING` | Pulsing dim orb         | WebSocket connecting           |
+| `LISTENING`  | Calm breathing orb      | Mic active, waiting for speech |
+| `THINKING`   | Spinning orb            | Processing user input          |
+| `SPEAKING`   | Pulsing bright orb      | Assistant audio playing        |
+| `ERROR`      | Red flash, then dismiss | Connection or API error        |
 
 ### LVGL implementation
 
@@ -142,7 +160,7 @@ The voice overlay renders on top of whatever page is active. It does NOT replace
 
 ## Constraints
 
-- **API key** lives in `sdkconfig.defaults.local` as a Kconfig option. Never hardcode.
+- **API key** lives in `apps/radio/sdkconfig.defaults.local` as a Kconfig option. Never hardcode.
 - **Memory**: WebSocket + audio buffers can consume 50-80 KB. Audio buffers go in PSRAM.
 - **ESP WebSocket client** (`esp_websocket_client`) handles TLS and reconnection. Configure with sufficient buffer size (8 KB+ for Realtime API frames).
 - **No simultaneous mic + DAC on same I2S peripheral.** Use separate I2S peripherals or time-multiplex. Current design uses two I2S peripherals.

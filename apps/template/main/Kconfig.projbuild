@@ -1,0 +1,21 @@
+menu "Knob App Configuration"
+
+    config RADIO_WIFI_SSID
+        string "WiFi SSID"
+        default ""
+
+    config RADIO_WIFI_PASSWORD
+        string "WiFi Password"
+        default ""
+
+    config RADIO_WIFI_MAX_RETRIES
+        int "WiFi Max Retries"
+        default 0
+        help
+            0 = infinite retries
+
+    config RADIO_TIMEZONE
+        string "Timezone (POSIX TZ)"
+        default "CET-1CEST,M3.5.0,M10.5.0/3"
+
+endmenu

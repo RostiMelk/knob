@@ -11,12 +11,16 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: espressif/idf:v5.4
+    strategy:
+      matrix:
+        app: [radio]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build ESP32-S3 firmware
+      - name: Build ${{ matrix.app }}
         shell: bash
+        working-directory: apps/${{ matrix.app }}
         run: |
           . $IDF_PATH/export.sh
           idf.py set-target esp32s3
@@ -26,9 +30,10 @@ jobs:
 
       - name: Report binary size
         shell: bash
+        working-directory: apps/${{ matrix.app }}
         run: |
           . $IDF_PATH/export.sh
-          echo '## Binary Size' >> $GITHUB_STEP_SUMMARY
+          echo "## ${{ matrix.app }} — Binary Size" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           idf.py size 2>/dev/null | tail -20 >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
