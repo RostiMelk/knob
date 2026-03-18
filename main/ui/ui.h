@@ -7,6 +7,7 @@ void ui_init();
 
 void ui_set_volume(int level);
 void ui_set_play_state(PlayState state);
+void ui_set_media_info(const MediaInfo *info);
 void ui_set_station(int index);
 void ui_set_wifi_status(bool connected);
 void ui_set_speaker_name(const char *name);

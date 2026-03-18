@@ -62,6 +62,12 @@ static void on_sonos_state(void *, esp_event_base_t, int32_t, void *data) {
     s_volume = state->volume;
     ui_set_volume(s_volume);
   }
+  if (state->station_index >= 0) {
+    ui_set_station(state->station_index);
+    ui_set_media_info(nullptr);
+  } else if (state->media.has_media) {
+    ui_set_media_info(&state->media);
+  }
 }
 
 static void on_timer_tick(void *) { timer_tick(); }

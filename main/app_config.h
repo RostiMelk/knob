@@ -100,23 +100,14 @@ constexpr Station STATIONS[] = {
     {"NRK Nyheter",
      "https://cdn0-47115-liveicecast0.dna.contentdelivery.net/nyheter_aac_h",
      "nrk_nyheter.png", 0x051428},
-    {"P4 Norge",
-     "https://p4.p4groupaudio.com/P04_MM",
-     "p4.png", 0x280A0B},
-    {"P5 Hits",
-     "https://p5.p4groupaudio.com/P05_MM",
-     "p5.png", 0x280506},
-    {"P9 Retro",
-     "https://p9.p4groupaudio.com/P09_MH",
-     "p9.png", 0x062818},
-    {"Radio Rock",
-     "https://live-bauerno.sharp-stream.com/radiorock_no_mp3",
+    {"P4 Norge", "https://p4.p4groupaudio.com/P04_MM", "p4.png", 0x280A0B},
+    {"P5 Hits", "https://p5.p4groupaudio.com/P05_MM", "p5.png", 0x280506},
+    {"P9 Retro", "https://p9.p4groupaudio.com/P09_MH", "p9.png", 0x062818},
+    {"Radio Rock", "https://live-bauerno.sharp-stream.com/radiorock_no_mp3",
      "radio_rock.png", 0x282828},
-    {"Radio Norge",
-     "https://live-bauerno.sharp-stream.com/radionorge_no_mp3",
+    {"Radio Norge", "https://live-bauerno.sharp-stream.com/radionorge_no_mp3",
      "radio_norge.png", 0x280505},
-    {"NRJ Norge",
-     "https://live-bauerno.sharp-stream.com/kiss_no_mp3",
+    {"NRJ Norge", "https://live-bauerno.sharp-stream.com/kiss_no_mp3",
      "nrj.png", 0x280505},
 };
 
@@ -175,10 +166,19 @@ enum class PlayState : uint8_t {
   Unknown,
 };
 
+struct MediaInfo {
+  char title[128];
+  char artist[128];
+  char source[32];   // "Spotify", "AirPlay", "Radio", etc.
+  char art_url[256]; // album art URI (relative or absolute)
+  bool has_media;    // true if metadata was successfully parsed
+};
+
 struct SonosState {
   PlayState play_state;
   int volume;
   int station_index; // -1 if URI doesn't match any known station
+  MediaInfo media;
 };
 
 // ─── Task Config ────────────────────────────────────────────────────────────

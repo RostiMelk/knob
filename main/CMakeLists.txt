@@ -36,6 +36,9 @@ set(SRCS
     "ui/ui_timer.cpp"
     "ui/ui_voice.cpp"
     "ui/display_idf.cpp"
+    "ui/tjpgd/tjpgd.c"
+    "ui/art_decoder.cpp"
+    "ui/squircle.cpp"
 )
 
 set(INCLUDE_DIRS

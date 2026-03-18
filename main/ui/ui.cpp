@@ -1,5 +1,6 @@
 #include "ui.h"
 #include "app_config.h"
+#include "art_decoder.h"
 #include "fonts/fonts.h"
 #include "input/haptic.h"
 #include "sonos/sonos.h"
@@ -9,6 +10,8 @@
 #include "ui_pages.h"
 #include "ui_timer.h"
 #include "ui_voice.h"
+
+#include "esp_heap_caps.h"
 
 #include "esp_log.h"
 #include "lvgl.h"
@@ -46,6 +49,8 @@ static constexpr int ANIM_BG_BROWSE_MS = 250;
 static constexpr uint8_t BACKLIGHT_NORMAL = 80;
 static constexpr uint8_t BACKLIGHT_DIM = 8;
 static constexpr int BACKLIGHT_FADE_STEP_MS = 30;
+static constexpr int BACKLIGHT_INACTIVITY_MS = 15000;
+static constexpr int ART_BUF_SIZE = 128 * 1024;
 
 // ─── Palette
 // ────────────────────────────────────────────────────────────────────────────
@@ -72,6 +77,9 @@ static int s_browse_index;
 static PlayState s_play_state = PlayState::Stopped;
 static bool s_was_playing;
 static bool s_idle_active = false;
+static bool s_external_playing = false;
+static bool s_browse_has_external = false;
+static MediaInfo s_media = {};
 
 // ─── Widgets
 // ────────────────────────────────────────────────────────────────────────────
@@ -120,8 +128,15 @@ static bool s_press_was_long;
 
 // Backlight dimming
 static lv_timer_t *s_bl_timer;
+static lv_timer_t *s_bl_inactivity_timer;
 static uint8_t s_bl_current = BACKLIGHT_NORMAL;
 static uint8_t s_bl_target = BACKLIGHT_NORMAL;
+
+// Album art (external media)
+static uint8_t *s_art_jpeg;      // Raw JPEG download buffer (PSRAM)
+static uint8_t *s_art_pixels;    // Decoded RGB565 pixels (PSRAM)
+static lv_image_dsc_t s_art_dsc; // LVGL image descriptor for decoded art
+static char s_art_last_url[256]; // Dedup — skip re-download if URL unchanged
 
 // Double-tap detection for voice mode
 static uint32_t s_last_tap_ms;
@@ -167,6 +182,8 @@ static void anim_bg_crossfade_done(lv_anim_t *a) {
   lv_color_t c = lv_obj_get_style_bg_color(s_bg_front, LV_PART_MAIN);
   lv_obj_set_style_bg_color(s_bg_back, c, LV_PART_MAIN);
   lv_obj_set_style_bg_opa(s_bg_front, LV_OPA_TRANSP, LV_PART_MAIN);
+  if (s_logo_container)
+    lv_obj_set_style_bg_color(s_logo_container, c, LV_PART_MAIN);
 }
 
 static void set_bg(int index, bool animate) {
@@ -194,6 +211,8 @@ static void set_bg(int index, bool animate) {
   if (!animate) {
     lv_obj_set_style_bg_color(s_bg_back, target, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(s_bg_front, LV_OPA_TRANSP, LV_PART_MAIN);
+    if (s_logo_container)
+      lv_obj_set_style_bg_color(s_logo_container, target, LV_PART_MAIN);
     return;
   }
 
@@ -305,6 +324,20 @@ static void backlight_fade_to(uint8_t target) {
   lv_timer_resume(s_bl_timer);
 }
 
+static void on_bl_inactivity(lv_timer_t *) {
+  lv_timer_pause(s_bl_inactivity_timer);
+  if (!s_idle_active)
+    backlight_fade_to(BACKLIGHT_DIM);
+}
+
+static void backlight_poke() {
+  backlight_fade_to(BACKLIGHT_NORMAL);
+  if (s_bl_inactivity_timer) {
+    lv_timer_reset(s_bl_inactivity_timer);
+    lv_timer_resume(s_bl_inactivity_timer);
+  }
+}
+
 static void on_vol_hide(lv_timer_t *) {
   anim_fade(s_vol_arc, anim_arc_ind_opa_cb, LV_OPA_COVER, LV_OPA_30,
             ANIM_ARC_FADE_MS);
@@ -317,9 +350,12 @@ static void on_vol_hide(lv_timer_t *) {
 // ────────────────────────────────
 
 static void on_browse_rotate_fade_done(lv_anim_t *) {
-  // Only swap logo during browse — bg stays on the playing station's image.
-  // Bg only transitions on confirm/exit (tap to play).
-  set_logo(s_browse_index);
+  if (s_browse_index < 0 && s_art_pixels) {
+    lv_image_set_src(s_img_logo, &s_art_dsc);
+    lv_image_set_inner_align(s_img_logo, LV_IMAGE_ALIGN_STRETCH);
+  } else if (s_browse_index >= 0) {
+    set_logo(s_browse_index);
+  }
   anim_fade(s_logo_container, anim_opa_cb, LV_OPA_TRANSP, LV_OPA_70,
             ANIM_QUICK_MS);
 }
@@ -348,7 +384,12 @@ static void show_idle_ui(bool idle) {
     return;
   s_idle_active = idle;
 
-  backlight_fade_to(idle ? BACKLIGHT_DIM : BACKLIGHT_NORMAL);
+  if (idle) {
+    backlight_fade_to(BACKLIGHT_DIM);
+    lv_timer_pause(s_bl_inactivity_timer);
+  } else {
+    backlight_poke();
+  }
 
   lv_anim_delete(s_lbl_clock, anim_opa_cb);
   lv_anim_delete(s_logo_container, anim_opa_cb);
@@ -386,16 +427,18 @@ static void show_idle_ui(bool idle) {
               lv_obj_get_style_opa(s_lbl_clock, LV_PART_MAIN), LV_OPA_TRANSP,
               ANIM_QUICK_MS, anim_hide_done);
 
-    lv_obj_remove_flag(s_logo_container, LV_OBJ_FLAG_HIDDEN);
+    if (!s_external_playing) {
+      lv_obj_remove_flag(s_logo_container, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_set_style_opa(s_logo_container, LV_OPA_TRANSP, LV_PART_MAIN);
+      anim_fade(s_logo_container, anim_opa_cb, LV_OPA_TRANSP, LV_OPA_COVER,
+                ANIM_FADE_MS);
+    }
     lv_obj_remove_flag(s_lbl_station, LV_OBJ_FLAG_HIDDEN);
     lv_obj_remove_flag(s_lbl_speaker, LV_OBJ_FLAG_HIDDEN);
 
-    lv_obj_set_style_opa(s_logo_container, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_opa(s_lbl_station, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_opa(s_lbl_speaker, LV_OPA_TRANSP, LV_PART_MAIN);
 
-    anim_fade(s_logo_container, anim_opa_cb, LV_OPA_TRANSP, LV_OPA_COVER,
-              ANIM_FADE_MS);
     anim_fade(s_lbl_station, anim_opa_cb, LV_OPA_TRANSP, LV_OPA_COVER,
               ANIM_FADE_MS);
     anim_fade(s_lbl_speaker, anim_opa_cb, LV_OPA_TRANSP, LV_OPA_60,
@@ -415,7 +458,7 @@ static void show_idle_ui(bool idle) {
 }
 
 static void show_volume(int level) {
-  backlight_fade_to(BACKLIGHT_NORMAL);
+  backlight_poke();
   lv_anim_delete(s_vol_arc, anim_arc_ind_opa_cb);
   lv_obj_set_style_arc_opa(s_vol_arc, LV_OPA_COVER, LV_PART_INDICATOR);
   lv_arc_set_value(s_vol_arc, level);
@@ -427,16 +470,32 @@ static void show_volume(int level) {
 // ─── Mode Switching
 // ─────────────────────────────────────────────────────────────────
 
+static int browse_total() {
+  return STATION_COUNT + (s_browse_has_external ? 1 : 0);
+}
+
+static int browse_display_pos() {
+  return s_browse_index + 1 + (s_browse_has_external ? 1 : 0);
+}
+
+static void browse_update_position() {
+  char pos[24];
+  snprintf(pos, sizeof(pos), "%d / %d", browse_display_pos(), browse_total());
+  lv_label_set_text(s_lbl_position, pos);
+}
+
 static void enter_browse() {
   s_mode = Mode::Browse;
   s_was_playing = (s_play_state == PlayState::Playing);
-  s_browse_index = s_station_index;
+  s_browse_has_external = s_external_playing;
+  s_browse_index = s_browse_has_external ? -1 : s_station_index;
 
   lv_obj_set_style_text_color(s_lbl_station, COL_TEXT, LV_PART_MAIN);
 
-  if (s_was_playing) {
+  if (s_was_playing || s_browse_has_external) {
     lv_anim_delete(s_logo_container, anim_opa_cb);
-    anim_fade(s_logo_container, anim_opa_cb, LV_OPA_COVER, LV_OPA_70,
+    anim_fade(s_logo_container, anim_opa_cb,
+              lv_obj_get_style_opa(s_logo_container, LV_PART_MAIN), LV_OPA_70,
               ANIM_FADE_MS);
   } else {
     show_idle_ui(false);
@@ -445,7 +504,11 @@ static void enter_browse() {
               ANIM_FADE_MS);
   }
 
-  lv_label_set_text(s_lbl_subtitle, "Tap to play");
+  if (s_browse_index < 0) {
+    lv_label_set_text(s_lbl_subtitle, s_media.source[0] ? s_media.source : "Now playing");
+  } else {
+    lv_label_set_text(s_lbl_subtitle, "Tap to play");
+  }
   lv_obj_set_style_text_color(s_lbl_subtitle, lv_color_hex(0xBBBBBB),
                               LV_PART_MAIN);
   lv_anim_delete(s_lbl_subtitle, anim_opa_cb);
@@ -453,9 +516,7 @@ static void enter_browse() {
   anim_fade(s_lbl_subtitle, anim_opa_cb, LV_OPA_TRANSP, LV_OPA_COVER,
             ANIM_QUICK_MS);
 
-  char pos[24];
-  snprintf(pos, sizeof(pos), "%d / %d", s_browse_index + 1, STATION_COUNT);
-  lv_label_set_text(s_lbl_position, pos);
+  browse_update_position();
   lv_obj_remove_flag(s_lbl_position, LV_OBJ_FLAG_HIDDEN);
   lv_obj_set_style_opa(s_lbl_position, LV_OPA_TRANSP, LV_PART_MAIN);
   anim_fade(s_lbl_position, anim_opa_cb, LV_OPA_TRANSP, LV_OPA_COVER,
@@ -471,7 +532,12 @@ static void enter_browse() {
 
 // Called after fade-out completes during browse exit — swaps logo while hidden
 static void on_exit_browse_fade_done(lv_anim_t *a) {
-  set_logo(s_station_index);
+  if (s_external_playing && s_art_pixels) {
+    lv_image_set_src(s_img_logo, &s_art_dsc);
+    lv_image_set_inner_align(s_img_logo, LV_IMAGE_ALIGN_STRETCH);
+  } else {
+    set_logo(s_station_index);
+  }
   anim_fade(s_logo_container, anim_opa_cb, LV_OPA_TRANSP, LV_OPA_COVER,
             ANIM_FADE_MS);
 }
@@ -481,10 +547,14 @@ static void exit_browse() {
 
   lv_obj_set_style_text_color(s_lbl_station, COL_TEXT, LV_PART_MAIN);
 
-  lv_label_set_text(s_lbl_station, STATIONS[s_station_index].name);
+  if (s_external_playing) {
+    lv_label_set_text(s_lbl_station,
+                      s_media.title[0] ? s_media.title : "Unknown");
+  } else {
+    lv_label_set_text(s_lbl_station, STATIONS[s_station_index].name);
+  }
   update_subtitle();
 
-  // Crossfade bg back to the playing station (only if it changed)
   set_bg(s_station_index, true);
 
   bool needs_image_swap = (s_browse_index != s_station_index);
@@ -530,9 +600,16 @@ static void exit_browse() {
 }
 
 static void confirm_browse() {
+  if (s_browse_index < 0) {
+    // External media entry — just exit browse, keep current stream
+    s_was_playing = true;
+    exit_browse();
+    return;
+  }
+  s_external_playing = false;
+  s_media = {};
   s_station_index = s_browse_index;
   set_logo(s_station_index);
-  // Crossfade bg to the newly confirmed station
   set_bg(s_station_index, true);
   int32_t idx = s_station_index;
   esp_event_post(APP_EVENT, APP_EVENT_STATION_CHANGED, &idx, sizeof(idx), 0);
@@ -548,10 +625,22 @@ static void on_browse_timeout(lv_timer_t *) { exit_browse(); }
 // ────────────────────────────────────────────────────────────
 
 static void update_subtitle() {
+  if (s_external_playing && s_media.artist[0]) {
+    lv_obj_set_width(s_lbl_subtitle, LCD_H_RES - 100);
+    lv_label_set_long_mode(s_lbl_subtitle, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_obj_set_style_text_align(s_lbl_subtitle, LV_TEXT_ALIGN_CENTER,
+                                LV_PART_MAIN);
+    lv_label_set_text(s_lbl_subtitle, s_media.artist);
+    return;
+  }
+
+  lv_label_set_long_mode(s_lbl_subtitle, LV_LABEL_LONG_WRAP);
+  lv_obj_set_width(s_lbl_subtitle, LV_SIZE_CONTENT);
+
   const char *text;
   switch (s_play_state) {
   case PlayState::Playing:
-    text = "Playing";
+    text = s_external_playing && s_media.source[0] ? s_media.source : "Playing";
     break;
   case PlayState::Paused:
     text = "Paused";
@@ -727,13 +816,15 @@ static void home_page_build(lv_obj_t *parent) {
   lv_obj_set_style_arc_rounded(s_vol_arc, true, LV_PART_INDICATOR);
   lv_obj_set_style_bg_opa(s_vol_arc, LV_OPA_TRANSP, LV_PART_KNOB);
 
-  // ── Station logo — squircle card ──
+  // ── Station logo — rounded card with clip ──
   s_logo_container = lv_obj_create(parent);
   lv_obj_set_size(s_logo_container, 120, 120);
-  lv_obj_set_style_radius(s_logo_container, 27, LV_PART_MAIN);
-  lv_obj_set_style_bg_opa(s_logo_container, LV_OPA_TRANSP, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(s_logo_container, lv_color_hex(STATIONS[0].color),
+                            LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(s_logo_container, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_set_style_border_width(s_logo_container, 0, LV_PART_MAIN);
   lv_obj_set_style_pad_all(s_logo_container, 0, LV_PART_MAIN);
+  lv_obj_set_style_radius(s_logo_container, 28, LV_PART_MAIN);
   lv_obj_set_style_clip_corner(s_logo_container, true, LV_PART_MAIN);
   lv_obj_remove_flag(s_logo_container, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_remove_flag(s_logo_container, LV_OBJ_FLAG_CLICKABLE);
@@ -985,6 +1076,10 @@ void ui_init() {
         lv_timer_create(on_backlight_step, BACKLIGHT_FADE_STEP_MS, nullptr);
     lv_timer_pause(s_bl_timer);
 
+    s_bl_inactivity_timer =
+        lv_timer_create(on_bl_inactivity, BACKLIGHT_INACTIVITY_MS, nullptr);
+    lv_timer_pause(s_bl_inactivity_timer);
+
     s_press_timer = lv_timer_create(on_press_timer, 500, nullptr);
     lv_timer_pause(s_press_timer);
 
@@ -1013,10 +1108,12 @@ void ui_init() {
 }
 
 void ui_set_volume(int level) {
-  if (display_lock(50)) {
-    s_volume = level;
-    if (pages_is_home() && s_vol_arc)
-      lv_arc_set_value(s_vol_arc, level);
+  if (display_lock(200)) {
+    if (level != s_volume) {
+      if (pages_is_home() && s_mode == Mode::Volume)
+        show_volume(level);
+      s_volume = level;
+    }
     display_unlock();
   }
 }
@@ -1026,6 +1123,13 @@ void ui_set_play_state(PlayState state) {
     return;
   if (display_lock(50)) {
     s_play_state = state;
+    if (state == PlayState::Stopped && s_external_playing) {
+      s_external_playing = false;
+      s_media = {};
+      lv_label_set_text(s_lbl_station, STATIONS[s_station_index].name);
+      lv_obj_remove_flag(s_logo_container, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_set_style_opa(s_logo_container, LV_OPA_COVER, LV_PART_MAIN);
+    }
     if (s_mode == Mode::Volume) {
       update_subtitle();
       show_idle_ui(state == PlayState::Stopped);
@@ -1037,17 +1141,139 @@ void ui_set_play_state(PlayState state) {
 void ui_set_station(int index) {
   if (index < 0 || index >= STATION_COUNT)
     return;
-  if (index == s_station_index)
+  if (index == s_station_index && !s_external_playing)
     return;
   if (display_lock(50)) {
+    bool was_external = s_external_playing;
     s_station_index = index;
+    s_external_playing = false;
+    s_media = {};
     if (s_mode == Mode::Volume) {
       lv_label_set_text(s_lbl_station, STATIONS[index].name);
+      if (was_external) {
+        lv_obj_remove_flag(s_logo_container, LV_OBJ_FLAG_HIDDEN);
+        lv_anim_delete(s_logo_container, anim_opa_cb);
+        lv_obj_set_style_opa(s_logo_container, LV_OPA_TRANSP, LV_PART_MAIN);
+        anim_fade(s_logo_container, anim_opa_cb, LV_OPA_TRANSP, LV_OPA_COVER,
+                  ANIM_FADE_MS);
+      }
       set_logo(index);
       set_bg(index, true);
+      update_subtitle();
     }
     display_unlock();
   }
+}
+
+static void art_free_pixels() {
+  if (s_art_pixels) {
+    heap_caps_free(s_art_pixels);
+    s_art_pixels = nullptr;
+  }
+  s_art_dsc = {};
+}
+
+void ui_set_media_info(const MediaInfo *info) {
+  // Download + decode album art OUTSIDE the display lock (HTTP + decode block)
+  bool art_ready = false;
+  if (info && info->has_media && info->art_url[0] &&
+      strcmp(info->art_url, s_art_last_url) != 0) {
+    ESP_LOGI(TAG, "Art URL changed: %.120s", info->art_url);
+    if (!s_art_jpeg)
+      s_art_jpeg = static_cast<uint8_t *>(
+          heap_caps_malloc(ART_BUF_SIZE, MALLOC_CAP_SPIRAM));
+    if (s_art_jpeg) {
+      int len = sonos_fetch_art(info->art_url, s_art_jpeg, ART_BUF_SIZE);
+      ESP_LOGI(TAG, "Art fetch returned %d bytes", len);
+      if (len > 0) {
+        art_free_pixels();
+        uint8_t *px = nullptr;
+        int aw = 0, ah = 0;
+        bool decoded = art_decode_jpeg(s_art_jpeg, len, &px, &aw, &ah, 160);
+        ESP_LOGI(TAG, "Art decode: %s (%dx%d, px=%p)", decoded ? "OK" : "FAIL",
+                 aw, ah, px);
+        if (decoded) {
+          s_art_pixels = px;
+          s_art_dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
+          s_art_dsc.header.cf = LV_COLOR_FORMAT_RGB565_SWAPPED;
+          s_art_dsc.header.w = static_cast<uint32_t>(aw);
+          s_art_dsc.header.h = static_cast<uint32_t>(ah);
+          s_art_dsc.header.stride = static_cast<uint32_t>(aw * 2);
+          s_art_dsc.data_size = static_cast<uint32_t>(aw * ah * 2);
+          s_art_dsc.data = s_art_pixels;
+          art_ready = true;
+          ESP_LOGI(TAG, "Art ready: %dx%d, %d bytes", (int)s_art_dsc.header.w,
+                   (int)s_art_dsc.header.h, (int)s_art_dsc.data_size);
+        }
+        strncpy(s_art_last_url, info->art_url, sizeof(s_art_last_url) - 1);
+        s_art_last_url[sizeof(s_art_last_url) - 1] = '\0';
+      }
+    } else {
+      ESP_LOGW(TAG, "Failed to allocate art JPEG buffer");
+    }
+  }
+
+  if (!display_lock(50))
+    return;
+
+  bool was_external = s_external_playing;
+
+  if (info && info->has_media && s_play_state != PlayState::Stopped) {
+    s_media = *info;
+    s_external_playing = true;
+
+    if (s_mode == Mode::Volume && !s_idle_active) {
+      lv_label_set_text(s_lbl_station,
+                        s_media.title[0] ? s_media.title : "Unknown");
+
+      // Show album art if we decoded it, otherwise hide the logo
+      if (s_art_pixels && (art_ready || !was_external)) {
+        lv_image_set_src(s_img_logo, &s_art_dsc);
+        lv_image_set_inner_align(s_img_logo, LV_IMAGE_ALIGN_STRETCH);
+        lv_obj_remove_flag(s_logo_container, LV_OBJ_FLAG_HIDDEN);
+        lv_anim_delete(s_logo_container, anim_opa_cb);
+        if (!was_external) {
+          lv_obj_set_style_opa(s_logo_container, LV_OPA_TRANSP, LV_PART_MAIN);
+          anim_fade(s_logo_container, anim_opa_cb, LV_OPA_TRANSP, LV_OPA_COVER,
+                    ANIM_FADE_MS);
+        } else {
+          lv_obj_set_style_opa(s_logo_container, LV_OPA_COVER, LV_PART_MAIN);
+        }
+      } else if (!s_art_pixels && !was_external) {
+        lv_anim_delete(s_logo_container, anim_opa_cb);
+        anim_fade(s_logo_container, anim_opa_cb,
+                  lv_obj_get_style_opa(s_logo_container, LV_PART_MAIN),
+                  LV_OPA_TRANSP, ANIM_FADE_MS, anim_hide_done);
+      }
+
+      if (s_media.source[0])
+        lv_label_set_text(s_lbl_speaker, s_media.source);
+
+      update_subtitle();
+    }
+  } else if (was_external) {
+    s_external_playing = false;
+    s_media = {};
+    s_art_last_url[0] = '\0';
+    if (s_mode == Mode::Volume && !s_idle_active) {
+      art_free_pixels();
+      lv_label_set_text(s_lbl_station, STATIONS[s_station_index].name);
+      set_logo(s_station_index);
+      lv_obj_remove_flag(s_logo_container, LV_OBJ_FLAG_HIDDEN);
+      lv_anim_delete(s_logo_container, anim_opa_cb);
+      anim_fade(s_logo_container, anim_opa_cb, LV_OPA_TRANSP, LV_OPA_COVER,
+                ANIM_FADE_MS);
+
+      char saved[64] = {};
+      settings_get_speaker_name(saved, sizeof(saved));
+      if (saved[0])
+        lv_label_set_text(s_lbl_speaker, saved);
+
+      update_subtitle();
+    }
+  }
+
+  display_unlock();
 }
 
 void ui_set_wifi_status(bool connected) {
@@ -1113,6 +1339,8 @@ void ui_on_encoder_rotate(int32_t steps) {
   if (!display_lock(50))
     return;
 
+  backlight_poke();
+
   if (s_on_picker) {
     if (s_discovered.count > 0) {
       s_speaker_highlight =
@@ -1152,10 +1380,21 @@ void ui_on_encoder_rotate(int32_t steps) {
     break;
   }
   case Mode::Browse: {
-    int new_idx = s_browse_index + static_cast<int>(steps);
-    s_browse_index =
-        ((new_idx % STATION_COUNT) + STATION_COUNT) % STATION_COUNT;
-    lv_label_set_text(s_lbl_station, STATIONS[s_browse_index].name);
+    int total = browse_total();
+    int base = s_browse_has_external ? -1 : 0;
+    int shifted = s_browse_index - base + static_cast<int>(steps);
+    shifted = ((shifted % total) + total) % total;
+    s_browse_index = shifted + base;
+
+    if (s_browse_index < 0) {
+      lv_label_set_text(s_lbl_station,
+                        s_media.title[0] ? s_media.title : "Unknown");
+      lv_label_set_text(s_lbl_subtitle,
+                        s_media.source[0] ? s_media.source : "Now playing");
+    } else {
+      lv_label_set_text(s_lbl_station, STATIONS[s_browse_index].name);
+      lv_label_set_text(s_lbl_subtitle, "Tap to play");
+    }
 
     lv_anim_delete(s_logo_container, anim_opa_cb);
     anim_fade(s_logo_container, anim_opa_cb,
@@ -1167,9 +1406,7 @@ void ui_on_encoder_rotate(int32_t steps) {
     anim_fade(s_lbl_station, anim_opa_cb, LV_OPA_TRANSP, LV_OPA_COVER,
               ANIM_QUICK_MS);
 
-    char pos[24];
-    snprintf(pos, sizeof(pos), "%d / %d", s_browse_index + 1, STATION_COUNT);
-    lv_label_set_text(s_lbl_position, pos);
+    browse_update_position();
 
     lv_timer_reset(s_browse_timer);
     break;
@@ -1184,6 +1421,7 @@ void ui_on_encoder_rotate(int32_t steps) {
 void ui_on_touch_tap() {
   if (!display_lock(50))
     return;
+  backlight_poke();
   pages_poke();
   if (s_mode == Mode::Voice)
     deactivate_voice();
