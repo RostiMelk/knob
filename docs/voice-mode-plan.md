@@ -165,7 +165,7 @@ Key choices:
 - **`interrupt_response: true`** — if the user starts talking while the AI is responding, it cancels and listens. Natural conversational behavior.
 - **`voice: cedar`** — OpenAI recommends `cedar` or `marin` for best quality.
 - **Input transcription enabled** — we get text transcripts of what the user said (for displaying on screen), running on a separate ASR model.
-- **`tools`** — six function-calling tools let the model control the device: set/cancel/query timers, switch stations, adjust volume, and check now-playing state. Implemented in `main/voice/voice_tools.cpp`.
+- **`tools`** — six function-calling tools let the model control the device: set/cancel/query timers, switch stations, adjust volume, and check now-playing state. Implemented in `components/knob_voice/src/voice_tools.cpp` (framework) and `apps/radio/main/voice/tools_radio.cpp` (radio-specific tools).
 - **`tool_choice: auto`** — the model decides when to call tools vs. respond with speech. For direct commands ("play jazz", "set a 5 minute timer") it calls the tool; for questions it responds normally.
 
 ### Event flow (happy path — speech response)
@@ -240,11 +240,11 @@ Key details:
 
 ### Authentication
 
-The API key (`OPENAI_API_KEY`) is stored in NVS, loaded from the SD card `.env` file on first boot (same as `WIFI_SSID` / `SPEAKER_IP`). Sent as `Authorization: Bearer <key>` in the WebSocket handshake headers.
+The API key (`OPENAI_API_KEY`) is stored in NVS, configured via `CONFIG_RADIO_OPENAI_API_KEY` in `sdkconfig.defaults.local` (same as WiFi credentials and speaker IP). Sent as `Authorization: Bearer <key>` in the WebSocket handshake headers.
 
 ```
-# .env addition
-OPENAI_API_KEY=sk-...
+# sdkconfig.defaults.local
+CONFIG_RADIO_OPENAI_API_KEY="sk-..."
 ```
 
 ---
@@ -395,14 +395,19 @@ COL_V_DIM      0x48484A   Dim hint text
 ### New files
 
 ```
-main/voice/
-  voice.h           Public API: voice_init(), voice_activate(), voice_deactivate()
-  voice.cpp          State machine, WebSocket client, audio orchestration
-  voice_audio.h      PDM capture + I2S playback helpers
-  voice_audio.cpp    Ring buffers, I2S driver setup, base64 encode/decode
+components/knob_voice/
+  include/voice_task.h       Public API: voice_task_init(), voice_task_start(), voice_task_stop()
+  include/voice_config.h     VoiceState enum, task constants, event IDs
+  include/voice_tools.h      Tool registry framework, REGISTER_TOOL macro
+  src/voice_task.cpp         State machine, WebSocket client, audio orchestration
+  src/voice_audio.cpp        I2S DAC playback, ring buffer, base64 decode
+  src/voice_mic.cpp          PDM mic capture, ring buffer
+  src/voice_protocol.cpp     OpenAI Realtime API JSON parser
+  src/voice_session.cpp      Session config builder
 
-main/ui/
-  ui_voice.cpp       Voice mode LVGL screen (orb, transcript, animations)
+apps/radio/main/
+  voice/tools_radio.cpp      Radio-specific voice tools (play_station, set_volume, etc.)
+  ui/ui_voice.cpp            Voice mode LVGL screen (orb, transcript, animations)
 ```
 
 ### New events (implemented in `app_config.h`)
@@ -441,10 +446,11 @@ constexpr const char* OPENAI_REALTIME_URL = "wss://api.openai.com/v1/realtime?mo
 constexpr const char* OPENAI_VOICE = "cedar";
 ```
 
-### New NVS / .env key
+### New Kconfig / NVS key
 
 ```
-OPENAI_API_KEY=sk-...
+# In sdkconfig.defaults.local
+CONFIG_RADIO_OPENAI_API_KEY="sk-..."
 ```
 
 ---
@@ -543,7 +549,7 @@ dependencies:
 
 ### Phase C — OpenAI WebSocket integration
 
-1. Add `OPENAI_API_KEY` to settings/NVS/.env
+1. Add `OPENAI_API_KEY` to settings/NVS/Kconfig (configured via `sdkconfig.defaults.local`)
 2. WebSocket client: connect, send session.update, handle events
 3. Voice task: mic ring buffer → base64 → `input_audio_buffer.append` every 100ms
 4. Parse `response.output_audio.delta` → base64 decode → playback ring buffer
@@ -599,11 +605,12 @@ WebSocket frames are sent every 100ms (~6.4KB base64 per frame). At typical WiFi
 
 ---
 
-## 12. .env Template Update
+## 12. Configuration Update
 
-```env
-# .env additions for voice mode
-OPENAI_API_KEY=sk-proj-...
+Add to `sdkconfig.defaults.local`:
+
+```
+CONFIG_RADIO_OPENAI_API_KEY="sk-proj-..."
 ```
 
 ---
@@ -648,4 +655,4 @@ These are future enhancements out of scope for the initial voice mode implementa
 
 ### ~~Function calling~~ → DONE
 
-Function calling (tool use) is implemented in `main/voice/`. The LLM can call tools to set timers, switch stations, adjust volume, and query now-playing state. See `voice_tools.h`, `voice_protocol.h`, and `voice_session.h`.
+Function calling (tool use) is implemented in `components/knob_voice/` (shared framework) and `apps/radio/main/voice/tools_radio.cpp` (radio-specific tools). The LLM can call tools to set timers, switch stations, adjust volume, and query now-playing state. See `voice_tools.h`, `voice_protocol.h`, and `voice_session.h`.

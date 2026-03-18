@@ -103,22 +103,6 @@ Pins verified from `ESP-IDF/02_SD_Card/components/sdcard_bsp/sdcard_bsp.c`.
 
 Mounted at `/sdcard` via `esp_vfs_fat_sdmmc`. FatFS formatted.
 
-### .env Config File
-
-On boot, the device reads `/sdcard/.env` if present. Standard `.env` format — `KEY=value`, one per line. Lines starting with `#` are comments.
-
-Copy `.env.template` from the project root to your SD card as `.env` and fill in your values:
-
-```
-WIFI_SSID=MyNetwork
-WIFI_PASS=MyPassword
-SPEAKER_IP=192.168.1.100
-VOLUME=25
-STATION=0
-```
-
-Values are written to NVS. The SD card can be removed after first boot — settings persist.
-
 ## Other Peripherals
 
 | Peripheral           | Interface        | Notes                               |

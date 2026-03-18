@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# test.sh — Local build + lint check. Run before pushing.
+# test.sh — Build + lint check for monorepo apps. Run before pushing.
 #
 # Usage:
-#   ./test.sh          Build firmware (ESP-IDF)
-#   ./test.sh --sim    Build simulator (SDL2) instead
-#   ./test.sh --all    Build both firmware + simulator
-#   ./test.sh --lint   Run clang-tidy lint only (requires prior build)
+#   ./test.sh              Build the default app (radio)
+#   ./test.sh radio        Build the radio app
+#   ./test.sh <app>        Build a specific app
+#   ./test.sh --all        Build all apps
+#   ./test.sh --lint       Run clang-tidy lint only (requires prior build)
 #
 # Exit codes:
 #   0 = all checks passed
@@ -21,92 +22,118 @@ NC='\033[0m'
 
 cd "$(dirname "$0")"
 
-MODE="firmware"
+APP=""
 LINT=false
+BUILD_ALL=false
 
 for arg in "$@"; do
   case "$arg" in
-    --sim)  MODE="sim" ;;
-    --all)  MODE="all" ;;
+    --all)  BUILD_ALL=true ;;
     --lint) LINT=true ;;
     -h|--help)
-      echo "Usage: ./test.sh [--sim] [--all] [--lint]"
-      echo "  (default)  Build ESP-IDF firmware"
-      echo "  --sim      Build SDL2 simulator"
-      echo "  --all      Build both"
-      echo "  --lint     Run clang-tidy (requires prior build)"
+      echo "Usage: ./test.sh [<app>] [--all] [--lint]"
+      echo "  (default)    Build the radio app"
+      echo "  <app>        Build a specific app (e.g., radio, homekit)"
+      echo "  --all        Build all apps in apps/"
+      echo "  --lint       Run clang-tidy (requires prior build)"
       exit 0
       ;;
-    *) echo "Unknown option: $arg"; exit 1 ;;
+    -*) echo "Unknown option: $arg"; exit 1 ;;
+    *)  APP="$arg" ;;
   esac
 done
 
+# Default to radio if no app specified
+if [ -z "$APP" ] && [ "$BUILD_ALL" = false ]; then
+  APP="radio"
+fi
+
 FAIL=0
 
-# ── Firmware build ──
-build_firmware() {
-  echo -e "${BOLD}▸ Building firmware (ESP-IDF)...${NC}"
+build_app() {
+  local app_name="$1"
+  local app_dir="apps/$app_name"
+
+  if [ ! -d "$app_dir" ]; then
+    echo -e "${RED}  ✗ App not found: $app_dir${NC}"
+    return 1
+  fi
+
+  echo -e "${BOLD}▸ Building $app_name...${NC}"
   if ! command -v idf.py &>/dev/null; then
     echo -e "${YELLOW}  idf.py not found — source ESP-IDF first:${NC}"
     echo "    source ~/esp/esp-idf/export.sh"
     return 1
   fi
+
+  pushd "$app_dir" > /dev/null
   idf.py set-target esp32s3 2>/dev/null || true
   if idf.py build; then
-    echo -e "${GREEN}  ✓ Firmware build passed${NC}"
+    echo -e "${GREEN}  ✓ $app_name build passed${NC}"
     echo ""
     idf.py size 2>/dev/null | grep -E "^(Total|Used)" || true
   else
-    echo -e "${RED}  ✗ Firmware build failed${NC}"
+    echo -e "${RED}  ✗ $app_name build failed${NC}"
+    popd > /dev/null
     return 1
   fi
+  popd > /dev/null
 }
 
-# ── Simulator build ──
-build_sim() {
-  echo -e "${BOLD}▸ Building simulator (SDL2)...${NC}"
-  if ! command -v cmake &>/dev/null; then
-    echo -e "${RED}  cmake not found${NC}"
-    return 1
-  fi
-  cmake -B build -S sim 2>/dev/null
-  if cmake --build build -j"$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"; then
-    echo -e "${GREEN}  ✓ Simulator build passed${NC}"
-  else
-    echo -e "${RED}  ✗ Simulator build failed${NC}"
-    return 1
-  fi
-}
-
-# ── Lint ──
 run_lint() {
-  echo -e "${BOLD}▸ Running clang-tidy lint...${NC}"
-  if [ ! -f build/compile_commands.json ]; then
-    echo -e "${YELLOW}  No compile_commands.json — build first${NC}"
+  local app_name="$1"
+  local app_dir="apps/$app_name"
+
+  echo -e "${BOLD}▸ Running clang-tidy lint ($app_name)...${NC}"
+  if [ ! -f "$app_dir/build/compile_commands.json" ]; then
+    echo -e "${YELLOW}  No compile_commands.json — build $app_name first${NC}"
     return 1
   fi
-  if ./scripts/lint.sh; then
-    echo -e "${GREEN}  ✓ Lint passed${NC}"
+  if [ -f scripts/lint.sh ]; then
+    if BUILD_DIR="$app_dir/build" ./scripts/lint.sh; then
+      echo -e "${GREEN}  ✓ Lint passed${NC}"
+    else
+      echo -e "${RED}  ✗ Lint issues found${NC}"
+      return 1
+    fi
   else
-    echo -e "${RED}  ✗ Lint issues found${NC}"
-    return 1
+    echo -e "${YELLOW}  No lint script found${NC}"
   fi
 }
 
-# ── Run ──
-case "$MODE" in
-  firmware) build_firmware || FAIL=1 ;;
-  sim)      build_sim || FAIL=1 ;;
-  all)
-    build_firmware || FAIL=1
+if [ "$BUILD_ALL" = true ]; then
+  for app_dir in apps/*/; do
+    app_name=$(basename "$app_dir")
+    build_app "$app_name" || FAIL=1
     echo ""
-    build_sim || FAIL=1
-    ;;
-esac
+  done
+else
+  build_app "$APP" || FAIL=1
+fi
 
-if $LINT || [ "$MODE" = "firmware" ] || [ "$MODE" = "all" ]; then
-  echo ""
-  run_lint || FAIL=1
+if ! $LINT; then
+  # Auto-lint after build
+  if [ "$BUILD_ALL" = true ]; then
+    for app_dir in apps/*/; do
+      app_name=$(basename "$app_dir")
+      echo ""
+      run_lint "$app_name" || FAIL=1
+    done
+  elif [ -n "$APP" ]; then
+    echo ""
+    run_lint "$APP" || FAIL=1
+  fi
+fi
+
+if $LINT; then
+  if [ "$BUILD_ALL" = true ]; then
+    for app_dir in apps/*/; do
+      app_name=$(basename "$app_dir")
+      run_lint "$app_name" || FAIL=1
+    done
+  elif [ -n "$APP" ]; then
+    run_lint "$APP" || FAIL=1
+  fi
 fi
 
 echo ""
