@@ -118,6 +118,10 @@ static lv_obj_t *s_lbl_speaker;
 // Artwork container (rounded card with shadow)
 static lv_obj_t *s_logo_container;
 
+// Prev/Next buttons (external media only)
+static lv_obj_t *s_btn_prev;
+static lv_obj_t *s_btn_next;
+
 // Volume arc (inside home page)
 static lv_obj_t *s_vol_arc;
 static lv_timer_t *s_vol_hide_timer;
@@ -251,6 +255,8 @@ static void activate_voice();
 static void deactivate_voice();
 static void on_page_changed(int index, const char *id);
 static void on_encoder_poll(lv_timer_t *);
+static void on_prev_tap(lv_event_t *);
+static void on_next_tap(lv_event_t *);
 
 // ─── Animation Helpers
 // ────────────────────────────────────────────────────────────────
@@ -853,6 +859,34 @@ static void home_page_build(lv_obj_t *parent) {
   lv_obj_remove_flag(s_logo_container, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_align(s_logo_container, LV_ALIGN_CENTER, 0, -30);
 
+  // ── Prev/Next buttons — flanking album art, only shown in external mode ──
+  auto make_media_btn = [&](bool is_next) -> lv_obj_t * {
+    lv_obj_t *btn = lv_obj_create(parent);
+    lv_obj_set_size(btn, 44, 44);
+    lv_obj_set_style_bg_opa(btn, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_width(btn, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(btn, LV_RADIUS_CIRCLE, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(btn, 0, LV_PART_MAIN);
+    lv_obj_remove_flag(btn, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(btn, LV_OBJ_FLAG_HIDDEN);
+    // Align to either side of the logo container (120px wide, centered at x=0,
+    // y=-30)
+    lv_obj_align(btn, LV_ALIGN_CENTER, is_next ? 90 : -90, -30);
+
+    lv_obj_t *lbl = lv_label_create(btn);
+    lv_obj_set_style_text_color(lbl, lv_color_hex(0xAAAAAA), LV_PART_MAIN);
+    lv_obj_set_style_text_font(lbl, &geist_regular_22, LV_PART_MAIN);
+    lv_label_set_text(lbl, is_next ? LV_SYMBOL_NEXT : LV_SYMBOL_PREV);
+    lv_obj_center(lbl);
+    return btn;
+  };
+
+  s_btn_prev = make_media_btn(false);
+  s_btn_next = make_media_btn(true);
+  lv_obj_add_event_cb(s_btn_prev, on_prev_tap, LV_EVENT_CLICKED, nullptr);
+  lv_obj_add_event_cb(s_btn_next, on_next_tap, LV_EVENT_CLICKED, nullptr);
+
   s_img_logo = lv_image_create(s_logo_container);
   lv_obj_set_size(s_img_logo, 120, 120);
   lv_image_set_inner_align(s_img_logo, LV_IMAGE_ALIGN_CENTER);
@@ -972,6 +1006,18 @@ static void highlight_picker_item(int highlight) {
       lv_obj_set_style_border_width(child, 1, LV_PART_MAIN);
     }
   }
+}
+
+static void on_prev_tap(lv_event_t *) {
+  backlight_poke();
+  haptic_buzz();
+  sonos_previous();
+}
+
+static void on_next_tap(lv_event_t *) {
+  backlight_poke();
+  haptic_buzz();
+  sonos_next();
 }
 
 static void on_skip_tap(lv_event_t *) {
@@ -1161,6 +1207,10 @@ void ui_set_play_state(PlayState state) {
     if (state == PlayState::Stopped && s_external_playing) {
       s_external_playing = false;
       s_media = {};
+      if (s_btn_prev && s_btn_next) {
+        lv_obj_add_flag(s_btn_prev, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_btn_next, LV_OBJ_FLAG_HIDDEN);
+      }
       lv_label_set_text(s_lbl_station, STATIONS[s_station_index].name);
       lv_obj_remove_flag(s_logo_container, LV_OBJ_FLAG_HIDDEN);
       lv_obj_set_style_opa(s_logo_container, LV_OPA_COVER, LV_PART_MAIN);
@@ -1186,6 +1236,10 @@ void ui_set_station(int index) {
     if (s_mode == Mode::Volume) {
       lv_label_set_text(s_lbl_station, STATIONS[index].name);
       if (was_external) {
+        if (s_btn_prev && s_btn_next) {
+          lv_obj_add_flag(s_btn_prev, LV_OBJ_FLAG_HIDDEN);
+          lv_obj_add_flag(s_btn_next, LV_OBJ_FLAG_HIDDEN);
+        }
         lv_obj_remove_flag(s_logo_container, LV_OBJ_FLAG_HIDDEN);
         lv_anim_delete(s_logo_container, anim_opa_cb);
         lv_obj_set_style_opa(s_logo_container, LV_OPA_TRANSP, LV_PART_MAIN);
@@ -1258,6 +1312,10 @@ void ui_set_media_info(const MediaInfo *info) {
     s_external_playing = true;
 
     if (s_mode == Mode::Volume && !s_idle_active) {
+      if (s_btn_prev && s_btn_next) {
+        lv_obj_remove_flag(s_btn_prev, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(s_btn_next, LV_OBJ_FLAG_HIDDEN);
+      }
       lv_label_set_text(s_lbl_station,
                         s_media.title[0] ? s_media.title : "Unknown");
 
@@ -1290,6 +1348,10 @@ void ui_set_media_info(const MediaInfo *info) {
     s_external_playing = false;
     s_media = {};
     s_art_last_url[0] = '\0';
+    if (s_btn_prev && s_btn_next) {
+      lv_obj_add_flag(s_btn_prev, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_add_flag(s_btn_next, LV_OBJ_FLAG_HIDDEN);
+    }
     if (s_mode == Mode::Volume && !s_idle_active) {
       art_free_pixels();
       lv_label_set_text(s_lbl_station, STATIONS[s_station_index].name);

@@ -79,9 +79,27 @@ static constexpr const char *PAUSE_BODY =
     "<InstanceID>0</InstanceID>"
     "</u:Pause>";
 
+static constexpr const char *PREVIOUS_BODY =
+    "<u:Previous xmlns:u=\"" AV_TRANSPORT_NS "\">"
+    "<InstanceID>0</InstanceID>"
+    "</u:Previous>";
+
+static constexpr const char *NEXT_BODY =
+    "<u:Next xmlns:u=\"" AV_TRANSPORT_NS "\">"
+    "<InstanceID>0</InstanceID>"
+    "</u:Next>";
+
 // ─── Command Queue ──────────────────────────────────────────────────────────
 
-enum class CmdType : uint8_t { PlayUri, Play, Pause, Stop, SetVolume };
+enum class CmdType : uint8_t {
+  PlayUri,
+  Play,
+  Pause,
+  Stop,
+  SetVolume,
+  Previous,
+  Next
+};
 
 struct Command {
   CmdType type;
@@ -374,6 +392,14 @@ static void exec_pause() {
   soap_fire(AV_TRANSPORT_PATH, "Pause", AV_TRANSPORT_NS, PAUSE_BODY);
 }
 
+static void exec_previous() {
+  soap_fire(AV_TRANSPORT_PATH, "Previous", AV_TRANSPORT_NS, PREVIOUS_BODY);
+}
+
+static void exec_next() {
+  soap_fire(AV_TRANSPORT_PATH, "Next", AV_TRANSPORT_NS, NEXT_BODY);
+}
+
 static void exec_stop_playback() {
   soap_fire(AV_TRANSPORT_PATH, "Stop", AV_TRANSPORT_NS, STOP_BODY);
 }
@@ -485,6 +511,12 @@ static void net_task(void *) {
       case CmdType::SetVolume:
         exec_set_volume(cmd.volume);
         break;
+      case CmdType::Previous:
+        exec_previous();
+        break;
+      case CmdType::Next:
+        exec_next();
+        break;
       }
     }
 
@@ -563,6 +595,16 @@ void sonos_set_volume(int level) {
   enqueue(cmd);
 }
 
+void sonos_previous() {
+  Command cmd = {.type = CmdType::Previous, .uri = {}};
+  enqueue(cmd);
+}
+
+void sonos_next() {
+  Command cmd = {.type = CmdType::Next, .uri = {}};
+  enqueue(cmd);
+}
+
 int sonos_fetch_art(const char *url, uint8_t *buf, int buf_size) {
   if (!url || !url[0] || !buf || buf_size <= 0)
     return 0;
@@ -602,9 +644,8 @@ int sonos_fetch_art(const char *url, uint8_t *buf, int buf_size) {
   // Read response body into buffer
   int total = 0;
   while (total < buf_size) {
-    int read_len =
-        esp_http_client_read(client, reinterpret_cast<char *>(buf + total),
-                             buf_size - total);
+    int read_len = esp_http_client_read(
+        client, reinterpret_cast<char *>(buf + total), buf_size - total);
     if (read_len <= 0)
       break;
     total += read_len;

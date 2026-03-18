@@ -13,6 +13,8 @@ void sonos_play();
 void sonos_pause();
 void sonos_stop_playback();
 void sonos_set_volume(int level);
+void sonos_previous();
+void sonos_next();
 
 // Download album art JPEG from the given URL into a caller-provided buffer.
 // Returns the number of bytes written, or 0 on failure.
