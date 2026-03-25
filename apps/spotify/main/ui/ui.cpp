@@ -358,6 +358,7 @@ void ui_update_state(const SpotifyState *state) {
         lv_label_set_text(s_lbl_artist, "");
         show_logo_centered();
         lv_obj_clear_flag(s_lbl_status, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_align(s_lbl_status, LV_ALIGN_CENTER, 0, 45);
         lv_label_set_text(s_lbl_status,
             "No active playback\n\n"
             "Play something on your\n"
