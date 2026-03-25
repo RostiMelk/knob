@@ -1,0 +1,98 @@
+# Target
+CONFIG_IDF_TARGET="esp32s3"
+
+# Flash
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+
+# Custom partition table (16MB flash, dual OTA)
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# CPU — max frequency for ESP32-S3 (default is 160MHz)
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# PSRAM (Octal, 8MB)
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_BOOT_INIT=y
+CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384
+
+# FreeRTOS
+CONFIG_FREERTOS_HZ=1000
+CONFIG_FREERTOS_TIMER_TASK_STACK_DEPTH=4096
+
+# System event task — default 2048 is too small when HTTP client
+# event handlers (Sonos SOAP) run on the system event loop.
+# HTTP client internally posts events that trigger handlers with
+# large stack frames (TLS + XML parsing). 8192 gives safe headroom.
+CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=8192
+
+# WiFi — tuned buffer counts (RX_BA_WIN must be <= DYNAMIC_RX_BUFFER_NUM
+# and <= 2 * STATIC_RX_BUFFER_NUM)
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=10
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=32
+CONFIG_ESP_WIFI_TX_BUFFER_TYPE=0
+CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=8
+
+# lwIP
+CONFIG_LWIP_MAX_SOCKETS=8
+CONFIG_LWIP_SO_RCVBUF=y
+
+# HTTP client
+CONFIG_ESP_HTTP_CLIENT_ENABLE_HTTPS=y
+
+# WebSocket client (for OpenAI Realtime API)
+CONFIG_ESP_WEBSOCKET_CLIENT_ENABLE=y
+
+# TLS — use certificate bundle for WSS connections
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
+
+# Compiler — optimize for performance
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+
+# Log level — INFO for dev, switch to WARN for release
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+
+# Watchdog
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
+
+# Console via USB-UART bridge
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+
+# LVGL LZ4 decompression for embedded compressed images
+CONFIG_LV_BIN_DECODER_RAM_LOAD=y
+CONFIG_LV_USE_LZ4=y
+
+# LVGL memory: use C stdlib malloc so large allocations go to PSRAM
+# (Kconfig choice: must explicitly disable builtin to switch)
+# CONFIG_LV_USE_BUILTIN_MALLOC is not set
+CONFIG_LV_USE_CLIB_MALLOC=y
+# CONFIG_LV_USE_BUILTIN_STRING is not set
+CONFIG_LV_USE_CLIB_STRING=y
+
+# LVGL image cache — decoded logo images stay in PSRAM
+# 12 logos × ~43KB RGB565A8 decoded + headroom for crossfade layers
+CONFIG_LV_CACHE_DEF_SIZE=1048576
+CONFIG_LV_IMAGE_HEADER_CACHE_DEF_CNT=24
+
+# LVGL refresh period — smoother animations (default is 33ms)
+CONFIG_LV_DEF_REFR_PERIOD=10
+
+# Pin main task to Core 1 (matches LVGL task affinity)
+CONFIG_ESP_MAIN_TASK_AFFINITY_CPU1=y
+
+# Draw buffer alignment — match ESP32-S3 cache line size for optimal DMA
+CONFIG_LV_DRAW_BUF_ALIGN=64
+
+# Move read-only data to PSRAM — frees flash cache for code execution
+CONFIG_SPIRAM_RODATA=y
+
+# Increase system event queue — Sonos HTTP polling fires many events at boot
+CONFIG_ESP_SYSTEM_EVENT_TASK_QUEUE_SIZE=64

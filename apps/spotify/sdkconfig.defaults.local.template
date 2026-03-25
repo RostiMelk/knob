@@ -1,0 +1,16 @@
+# Local secrets — copy to sdkconfig.defaults.local and fill in values.
+# This file is gitignored. Never commit real credentials.
+#
+# To get your Spotify credentials:
+#   1. Create an app at https://developer.spotify.com/dashboard
+#      - Set redirect URI to http://127.0.0.1:8888/callback
+#      - Enable "Web API"
+#   2. Run: python3 scripts/get_token.py YOUR_CLIENT_ID
+#      - This opens a browser for Spotify login and prints a refresh token.
+#
+# NOTE: CONFIG_RADIO_* prefix is required by shared components — not a typo.
+
+CONFIG_RADIO_WIFI_SSID="your_wifi_ssid"
+CONFIG_RADIO_WIFI_PASSWORD="your_wifi_password"
+CONFIG_SPOTIFY_CLIENT_ID="your_spotify_client_id"
+CONFIG_SPOTIFY_REFRESH_TOKEN="your_refresh_token"
