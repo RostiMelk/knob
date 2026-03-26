@@ -10,6 +10,8 @@ idf_component_register(
         esp_lcd
         esp_timer
         esp_event
+        lvgl__lvgl
+        espressif__esp_lvgl_port
     PRIV_REQUIRES
         esp_psram
 )

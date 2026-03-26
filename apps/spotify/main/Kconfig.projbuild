@@ -1,0 +1,45 @@
+menu "Spotify Knob"
+
+    # NOTE: CONFIG_RADIO_* prefix is required — shared components (knob_net,
+    # knob_storage) reference these symbols by name. This is not a mistake.
+
+    config RADIO_WIFI_SSID
+        string "WiFi SSID"
+        default ""
+
+    config RADIO_WIFI_PASSWORD
+        string "WiFi Password"
+        default ""
+
+    config RADIO_WIFI_MAX_RETRIES
+        int "WiFi Max Retries"
+        default 5
+        range 1 20
+
+    # Required by shared knob_storage component (unused by Spotify app)
+    config RADIO_VOLUME_DEFAULT
+        int "Default volume"
+        default 50
+        range 0 100
+
+    config RADIO_SONOS_SPEAKER_IP
+        string "Sonos speaker IP (unused — required by shared components)"
+        default ""
+
+    config RADIO_SONOS_POLL_INTERVAL_MS
+        int "Sonos poll interval (unused — required by shared components)"
+        default 2000
+
+    config SPOTIFY_CLIENT_ID
+        string "Spotify Client ID"
+        default ""
+        help
+            From https://developer.spotify.com/dashboard
+
+    config SPOTIFY_REFRESH_TOKEN
+        string "Spotify Refresh Token"
+        default ""
+        help
+            Run scripts/get_token.py to obtain this.
+
+endmenu
