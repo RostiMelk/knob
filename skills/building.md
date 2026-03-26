@@ -35,11 +35,11 @@ All top-level commands (`./test.sh`, `./flash.sh`) accept an app name as the fir
 # Flash a specific app to a knob:
 ./flash.sh             # build + flash radio (default)
 ./flash.sh radio -m    # build + flash + serial monitor
-./flash.sh homekit -m  # flash a different app
+./flash.sh spotify -m  # flash a different app
+./flash.sh radio --build-only  # build only, no flash
 
-# Or work directly from the app directory:
+# Or build directly from an app directory:
 cd apps/radio && idf.py build
-cd apps/radio && ./flash.sh -m
 
 # Lint only (requires prior build for compile_commands.json):
 scripts/lint.sh
@@ -58,18 +58,13 @@ Each app under `apps/` is fully self-contained. It has its own:
 - `sdkconfig.defaults` — base Kconfig (committed)
 - `sdkconfig.defaults.local` — secrets: WiFi, API keys (gitignored)
 - `partitions.csv` — flash partition layout
-- `flash.sh` — per-app flash script with port detection
 
-To build and flash any app:
+There is a single `flash.sh` at the repo root — no per-app flash scripts. It handles port detection, build, flash, and monitor for any app:
 
 ```bash
-# From repo root (dispatches to the app):
 ./flash.sh <app> -m
-
-# Or from inside the app directory:
-cd apps/<app>
-idf.py build
-./flash.sh -m
+./flash.sh <app> --build-only
+./flash.sh <app> --log serial.log
 ```
 
 Each app gets its own `build/` directory, `sdkconfig`, and `managed_components/`. They don't interfere with each other — you can build radio and homekit back-to-back without clean builds.

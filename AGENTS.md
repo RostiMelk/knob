@@ -108,12 +108,10 @@ All top-level commands accept an app name. If omitted, they default to `radio`.
 ./test.sh --all        # build every app under apps/
 
 # Flash a specific app to a knob:
+./flash.sh             # build + flash radio (default)
 ./flash.sh radio -m    # build + flash + serial monitor
-./flash.sh homekit     # flash a different app
-
-# Or work directly from an app directory:
-cd apps/radio && idf.py build
-cd apps/radio && ./flash.sh -m
+./flash.sh spotify -m  # flash a different app
+./flash.sh radio --build-only  # build only, no flash
 ```
 
 Each app has its own `build/`, `sdkconfig`, and `managed_components/`. Building one app doesn't affect another.
