@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Knob - Connecting...</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+background:#111;color:#fff;display:flex;justify-content:center;align-items:center;
+min-height:100vh;text-align:center;padding:20px}
+.wrap{max-width:360px}
+h1{font-size:1.3em;margin-bottom:12px}
+p{color:#b3b3b3;font-size:.95em;margin-top:8px}
+a.btn{display:inline-block;padding:14px 32px;border-radius:24px;
+background:#1DB954;color:#fff;font-size:1em;font-weight:600;
+text-decoration:none;margin-top:20px}
+a.btn:hover{background:#1ed760}
+.error{color:#e74c3c}
+.ok{color:#1DB954}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1 id="title">Connecting your knob...</h1>
+<p id="status">Tap below to finish setup.</p>
+<a class="btn" id="go-btn" href="#" style="display:none">Finish setup on device</a>
+</div>
+<script>
+(function(){
+  var p = new URLSearchParams(location.search);
+  var code = p.get('code');
+  var state = p.get('state');
+  var error = p.get('error');
+
+  if (error) {
+    document.getElementById('title').textContent = 'Auth failed';
+    document.getElementById('status').innerHTML =
+      '<span class="error">Spotify error: ' + error + '</span>';
+    return;
+  }
+
+  if (!code || !state) {
+    document.getElementById('title').textContent = 'Error';
+    document.getElementById('status').innerHTML =
+      '<span class="error">Missing auth code or device address.</span>';
+    return;
+  }
+
+  var deviceUrl = 'http://' + state + ':8888/callback?code=' + encodeURIComponent(code);
+
+  // Show a button — auto-redirect from HTTPS to HTTP is blocked by some browsers
+  var btn = document.getElementById('go-btn');
+  btn.href = deviceUrl;
+  btn.style.display = 'inline-block';
+  document.getElementById('status').textContent =
+    'Authorized! Tap the button to send the token to your knob.';
+
+  // No auto-redirect — HTTPS→HTTP is blocked by most mobile browsers
+})();
+</script>
+</body>
+</html>

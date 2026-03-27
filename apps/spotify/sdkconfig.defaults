@@ -47,12 +47,20 @@ CONFIG_LWIP_SO_RCVBUF=y
 # HTTP client
 CONFIG_ESP_HTTP_CLIENT_ENABLE_HTTPS=y
 
+# HTTP server — increase limits for captive portal + Spotify OAuth callback
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
+CONFIG_HTTPD_MAX_URI_LEN=1024
+
 # WebSocket client (for OpenAI Realtime API)
 CONFIG_ESP_WEBSOCKET_CLIENT_ENABLE=y
 
 # TLS — use certificate bundle for WSS connections
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
+
+# TLS memory — use PSRAM so SSL contexts don't exhaust internal RAM
+# (internal RAM is tight with WiFi + HTTP server + LVGL all running)
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
 
 # Compiler — optimize for performance
 CONFIG_COMPILER_OPTIMIZATION_PERF=y
@@ -70,6 +78,12 @@ CONFIG_ESP_CONSOLE_UART_DEFAULT=y
 CONFIG_LV_BIN_DECODER_RAM_LOAD=y
 CONFIG_LV_USE_LZ4=y
 
+# LVGL QR code support (for WiFi setup screen)
+CONFIG_LV_USE_QRCODE=y
+
+# Montserrat 14 as fallback font for accented Latin chars (é, ü, ñ, etc.)
+CONFIG_LV_FONT_MONTSERRAT_14=y
+
 # LVGL memory: use C stdlib malloc so large allocations go to PSRAM
 # (Kconfig choice: must explicitly disable builtin to switch)
 # CONFIG_LV_USE_BUILTIN_MALLOC is not set
@@ -84,6 +98,9 @@ CONFIG_LV_IMAGE_HEADER_CACHE_DEF_CNT=24
 
 # LVGL refresh period — smoother animations (default is 33ms)
 CONFIG_LV_DEF_REFR_PERIOD=10
+
+# Main task stack — WiFi picker runs scan + LVGL on app_main, needs headroom
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 
 # Pin main task to Core 1 (matches LVGL task affinity)
 CONFIG_ESP_MAIN_TASK_AFFINITY_CPU1=y

@@ -34,6 +34,8 @@ static lv_obj_t  *s_progress_arc = nullptr;
 static lv_obj_t  *s_play_icon    = nullptr;
 static lv_obj_t  *s_logo         = nullptr;
 static lv_obj_t  *s_art_loading  = nullptr; // pulsating placeholder
+static lv_obj_t  *s_qr_code     = nullptr;  // QR code (setup screens)
+static lv_obj_t  *s_seek_lbl    = nullptr;  // seek offset label ("+6s")
 
 // ─── State
 static volatile int s_volume     = 50;
@@ -50,7 +52,16 @@ static int          s_progress_ms = 0;
 static int          s_duration_ms = 0;
 static int64_t      s_progress_update_at = 0; // when we last got a server update
 
+// ─── Touch+seek state
+static bool         s_touch_down = false;     // finger on screen
+static bool         s_seeking    = false;     // encoder moved while touched
+static int          s_seek_ms    = 0;         // current seek position
+static int64_t      s_touch_down_at = 0;      // when finger went down
+static int          s_encoder_while_touched = 0; // accumulated steps while touched
+
 static constexpr int VOL_LOCAL_GRACE_MS = 5000;
+static constexpr int SEEK_STEP_MS = 3000;    // ms per encoder step when seeking
+static constexpr int SKIP_FLICK_THRESHOLD = 3; // steps in one poll = flick
 
 // ─── Art image buffer (PSRAM)
 static uint8_t     *s_art_jpeg_buf = nullptr;
@@ -144,14 +155,36 @@ static void build_home(lv_obj_t *parent) {
     lv_obj_set_style_clip_corner(s_art_img, true, 0);
     lv_obj_add_flag(s_art_img, LV_OBJ_FLAG_HIDDEN);
 
-    // Play/pause icon overlay (centered on art area)
-    s_play_icon = lv_label_create(s_bg);
-    lv_label_set_text(s_play_icon, "||");
-    lv_obj_set_style_text_font(s_play_icon, &geist_medium_28, 0);
-    lv_obj_set_style_text_color(s_play_icon, COL_WHITE, 0);
-    lv_obj_set_style_opa(s_play_icon, LV_OPA_70, 0);
-    lv_obj_align(s_play_icon, LV_ALIGN_CENTER, 0, -15);
+    // Pause indicator — small pill to the right of album art
+    s_play_icon = lv_obj_create(s_bg);
+    lv_obj_remove_style_all(s_play_icon);
+    lv_obj_set_size(s_play_icon, 36, 36);
+    lv_obj_align(s_play_icon, LV_ALIGN_CENTER, 95, -15);
+    lv_obj_set_style_bg_color(s_play_icon, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(s_play_icon, LV_OPA_70, 0);
+    lv_obj_set_style_radius(s_play_icon, LV_RADIUS_CIRCLE, 0);
+    lv_obj_clear_flag(s_play_icon, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE));
     lv_obj_add_flag(s_play_icon, LV_OBJ_FLAG_HIDDEN);
+
+    // Two thin bars drawn as LVGL objects for a clean pause icon
+    for (int i = 0; i < 2; i++) {
+        lv_obj_t *bar = lv_obj_create(s_play_icon);
+        lv_obj_remove_style_all(bar);
+        lv_obj_set_size(bar, 4, 14);
+        lv_obj_set_style_bg_color(bar, COL_WHITE, 0);
+        lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
+        lv_obj_set_style_radius(bar, 2, 0);
+        lv_obj_align(bar, LV_ALIGN_CENTER, (i == 0) ? -4 : 4, 0);
+    }
+
+    // Seek offset label (hidden, shown during seek)
+    s_seek_lbl = lv_label_create(s_bg);
+    lv_label_set_text(s_seek_lbl, "");
+    lv_obj_set_style_text_font(s_seek_lbl, &geist_medium_28, 0);
+    lv_obj_set_style_text_color(s_seek_lbl, COL_GREEN, 0);
+    lv_obj_set_style_text_align(s_seek_lbl, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(s_seek_lbl, LV_ALIGN_CENTER, 0, 55);
+    lv_obj_add_flag(s_seek_lbl, LV_OBJ_FLAG_HIDDEN);
 
     // Track name — Geist 22 for Norwegian char support
     s_lbl_track = lv_label_create(s_bg);
@@ -183,33 +216,97 @@ static void build_home(lv_obj_t *parent) {
     lv_obj_set_style_radius(s_art_loading, 16, 0);
     lv_obj_add_flag(s_art_loading, LV_OBJ_FLAG_HIDDEN);
 
-    // Spotify logo
+    // Spotify logo (hidden initially — splash screen shows first)
     s_logo = lv_image_create(s_bg);
     lv_image_set_src(s_logo, &spotify_logo_64);
     lv_obj_align(s_logo, LV_ALIGN_CENTER, 0, -40);
+    lv_obj_add_flag(s_logo, LV_OBJ_FLAG_HIDDEN);
 
-    // Status label
+    // Status label (hidden initially)
     s_lbl_status = lv_label_create(s_bg);
-    lv_label_set_text(s_lbl_status, "Connecting to WiFi...");
+    lv_label_set_text(s_lbl_status, "");
     lv_obj_set_width(s_lbl_status, 280);
     lv_obj_set_style_text_color(s_lbl_status, COL_GREY, 0);
     lv_obj_set_style_text_font(s_lbl_status, &geist_regular_16, 0);
     lv_obj_set_style_text_align(s_lbl_status, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_long_mode(s_lbl_status, LV_LABEL_LONG_WRAP);
     lv_obj_align(s_lbl_status, LV_ALIGN_CENTER, 0, 20);
+    lv_obj_add_flag(s_lbl_status, LV_OBJ_FLAG_HIDDEN);
 
-    // Touch handler — tap = play/pause (optimistic, separate events)
+    // Touch: PRESSED — enter seek-ready mode
     lv_obj_add_event_cb(s_bg, [](lv_event_t *) {
         poke();
         if (!s_has_track) return;
+        s_touch_down = true;
+        s_touch_down_at = esp_timer_get_time();
+        s_encoder_while_touched = 0;
+        s_seeking = false;
 
-        // Optimistic toggle — fire the correct event
+        haptic_buzz();
+
+        // Visual: dim the art to show "touch held" state
+        lv_obj_set_style_opa(s_art_img, LV_OPA_60, 0);
+        // Show progress arc prominently
+        if (s_duration_ms > 0) {
+            lv_obj_set_style_arc_width(s_progress_arc, 6, LV_PART_INDICATOR);
+            lv_obj_set_style_arc_color(s_progress_arc, COL_GREEN, LV_PART_INDICATOR);
+            fade_to(s_progress_arc, LV_OPA_COVER, 100);
+        }
+    }, LV_EVENT_PRESSED, nullptr);
+
+    // Touch: RELEASED — exit seek mode, send final seek if needed
+    lv_obj_add_event_cb(s_bg, [](lv_event_t *) {
+        if (!s_has_track) return;
+        bool was_seeking = s_seeking;
+        s_touch_down = false;
+        s_seeking = false;
+
+        // Restore visuals
+        lv_obj_set_style_opa(s_art_img, LV_OPA_COVER, 0);
+        lv_obj_set_style_arc_width(s_progress_arc, 3, LV_PART_INDICATOR);
+        lv_obj_set_style_arc_color(s_progress_arc, COL_WHITE, LV_PART_INDICATOR);
+        lv_obj_add_flag(s_seek_lbl, LV_OBJ_FLAG_HIDDEN);
+
+        // If we were seeking, commit the final position
+        if (was_seeking) {
+            int32_t pos = s_seek_ms;
+            esp_event_post(APP_EVENT, APP_EVENT_SPOTIFY_SEEK, &pos, sizeof(pos), 0);
+            s_progress_ms = s_seek_ms;
+            s_progress_update_at = esp_timer_get_time();
+        }
+    }, LV_EVENT_RELEASED, nullptr);
+
+    lv_obj_add_event_cb(s_bg, [](lv_event_t *) {
+        // Also handle press lost (finger dragged off)
+        bool was_seeking = s_seeking;
+        s_touch_down = false;
+        s_seeking = false;
+        lv_obj_set_style_opa(s_art_img, LV_OPA_COVER, 0);
+        lv_obj_set_style_arc_width(s_progress_arc, 3, LV_PART_INDICATOR);
+        lv_obj_set_style_arc_color(s_progress_arc, COL_WHITE, LV_PART_INDICATOR);
+        lv_obj_add_flag(s_seek_lbl, LV_OBJ_FLAG_HIDDEN);
+        if (was_seeking) {
+            int32_t pos = s_seek_ms;
+            esp_event_post(APP_EVENT, APP_EVENT_SPOTIFY_SEEK, &pos, sizeof(pos), 0);
+            s_progress_ms = s_seek_ms;
+            s_progress_update_at = esp_timer_get_time();
+        }
+    }, LV_EVENT_PRESS_LOST, nullptr);
+
+    // Touch: SHORT_CLICKED — play/pause only if we didn't seek
+    lv_obj_add_event_cb(s_bg, [](lv_event_t *) {
+        poke();
+        if (!s_has_track) return;
+        if (s_encoder_while_touched > 0) return; // was seeking/skipping, not a tap
+
+        haptic_buzz();
+
+        // Optimistic toggle
         s_is_playing = !s_is_playing;
         if (s_is_playing) {
             lv_obj_add_flag(s_play_icon, LV_OBJ_FLAG_HIDDEN);
             esp_event_post(APP_EVENT, APP_EVENT_SPOTIFY_PLAY, nullptr, 0, 0);
         } else {
-            lv_label_set_text(s_play_icon, "||");
             lv_obj_clear_flag(s_play_icon, LV_OBJ_FLAG_HIDDEN);
             esp_event_post(APP_EVENT, APP_EVENT_SPOTIFY_PAUSE, nullptr, 0, 0);
         }
@@ -228,22 +325,25 @@ static void tick_cb(lv_timer_t *) {
         s_dimmed = true;
     }
 
-    // Fade volume out, fade progress back in
-    if (s_vol_visible && now >= s_vol_hide_at) {
-        fade_to(s_vol_arc, LV_OPA_TRANSP, 300);
-        s_vol_visible = false;
-        if (s_has_track) {
-            fade_to(s_progress_arc, LV_OPA_COVER, 400);
+    // Skip volume/progress animation while touch is down (seek mode owns the arcs)
+    if (!s_touch_down) {
+        // Fade volume out, fade progress back in
+        if (s_vol_visible && now >= s_vol_hide_at) {
+            fade_to(s_vol_arc, LV_OPA_TRANSP, 300);
+            s_vol_visible = false;
+            if (s_has_track) {
+                fade_to(s_progress_arc, LV_OPA_COVER, 400);
+            }
         }
-    }
 
-    // Smooth progress interpolation (ticks every 20ms while playing)
-    if (s_has_track && s_is_playing && s_duration_ms > 0 && !s_vol_visible) {
-        int64_t elapsed_us = now - s_progress_update_at;
-        int interpolated_ms = s_progress_ms + (int)(elapsed_us / 1000);
-        if (interpolated_ms > s_duration_ms) interpolated_ms = s_duration_ms;
-        int progress = (int)((int64_t)interpolated_ms * 1000 / s_duration_ms);
-        lv_arc_set_value(s_progress_arc, progress);
+        // Smooth progress interpolation (ticks every 20ms while playing)
+        if (s_has_track && s_is_playing && s_duration_ms > 0 && !s_vol_visible) {
+            int64_t elapsed_us = now - s_progress_update_at;
+            int interpolated_ms = s_progress_ms + (int)(elapsed_us / 1000);
+            if (interpolated_ms > s_duration_ms) interpolated_ms = s_duration_ms;
+            int progress = (int)((int64_t)interpolated_ms * 1000 / s_duration_ms);
+            lv_arc_set_value(s_progress_arc, progress);
+        }
     }
 
     // Poll encoder
@@ -255,24 +355,74 @@ static void tick_cb(lv_timer_t *) {
 
     if (!s_has_track) return;
 
-    // Fast spin = skip track. ≥3 steps in one 20ms poll = flick.
-    // Just skip and consume the steps — no volume change.
-    static int64_t last_skip = 0;
-    static constexpr int SKIP_THRESHOLD = 3;
-    static constexpr int64_t SKIP_COOLDOWN_US = 2000000; // 2s
+    // ─── Touch down + encoder = seek / skip
+    if (s_touch_down) {
+        s_encoder_while_touched += abs(steps);
+        static int64_t last_skip = 0;
+        static constexpr int64_t SKIP_COOLDOWN_US = 2000000; // 2s
 
-    if (abs(steps) >= SKIP_THRESHOLD &&
-        (now - last_skip) > SKIP_COOLDOWN_US) {
-        last_skip = now;
-        if (steps > 0) {
-            esp_event_post(APP_EVENT, APP_EVENT_SPOTIFY_NEXT, nullptr, 0, 0);
-        } else {
-            esp_event_post(APP_EVENT, APP_EVENT_SPOTIFY_PREV, nullptr, 0, 0);
+        // Fast flick while touching = skip track
+        if (abs(steps) >= SKIP_FLICK_THRESHOLD &&
+            (now - last_skip) > SKIP_COOLDOWN_US) {
+            last_skip = now;
+            if (steps > 0) {
+                esp_event_post(APP_EVENT, APP_EVENT_SPOTIFY_NEXT, nullptr, 0, 0);
+            } else {
+                esp_event_post(APP_EVENT, APP_EVENT_SPOTIFY_PREV, nullptr, 0, 0);
+            }
+            s_seeking = false; // skip overrides seek
+            return;
         }
-        return; // consume steps — no volume change
+
+        // Slow turn while touching = seek
+        int origin_ms;
+        if (!s_seeking) {
+            // Initialize seek position from current interpolated progress
+            int64_t elapsed_us = now - s_progress_update_at;
+            origin_ms = s_progress_ms;
+            if (s_is_playing) {
+                origin_ms += (int)(elapsed_us / 1000);
+            }
+            s_seek_ms = origin_ms;
+            s_seeking = true;
+
+            // Hide volume arc, ensure progress arc visible
+            lv_obj_set_style_opa(s_vol_arc, LV_OPA_TRANSP, 0);
+            s_vol_visible = false;
+        } else {
+            // Compute origin for offset display
+            int64_t elapsed_us = now - s_progress_update_at;
+            origin_ms = s_progress_ms;
+            if (s_is_playing) {
+                origin_ms += (int)(elapsed_us / 1000);
+            }
+        }
+
+        s_seek_ms += steps * SEEK_STEP_MS;
+        if (s_seek_ms < 0) s_seek_ms = 0;
+        if (s_seek_ms > s_duration_ms) s_seek_ms = s_duration_ms;
+
+        // Update progress arc to show seek position
+        if (s_duration_ms > 0) {
+            int progress = (int)((int64_t)s_seek_ms * 1000 / s_duration_ms);
+            lv_arc_set_value(s_progress_arc, progress);
+        }
+
+        // Show seek offset label (e.g. "+6s" or "-3s")
+        int offset_s = (s_seek_ms - origin_ms) / 1000;
+        char buf[16];
+        if (offset_s >= 0) {
+            snprintf(buf, sizeof(buf), "+%ds", offset_s);
+        } else {
+            snprintf(buf, sizeof(buf), "%ds", offset_s);
+        }
+        lv_label_set_text(s_seek_lbl, buf);
+        lv_obj_clear_flag(s_seek_lbl, LV_OBJ_FLAG_HIDDEN);
+
+        return;
     }
 
-    // Volume adjust
+    // ─── No touch = volume adjust (unchanged)
     int cur_vol = s_volume;
     int new_vol = cur_vol + steps * 2;
     if (new_vol < 0) new_vol = 0;
@@ -288,6 +438,42 @@ static void tick_cb(lv_timer_t *) {
 
 // ─── Public API
 
+static void cleanup_qr() {
+    if (s_qr_code) {
+        lv_obj_delete(s_qr_code);
+        s_qr_code = nullptr;
+    }
+}
+
+// Create a QR code with the Spotify logo overlaid in the center.
+// QR error correction handles ~30% coverage, logo is ~20%.
+static lv_obj_t *create_branded_qr(lv_obj_t *parent, const char *data,
+                                    int qr_size, int y_offset) {
+    cleanup_qr();
+    s_qr_code = lv_qrcode_create(parent);
+    lv_qrcode_set_size(s_qr_code, qr_size);
+    lv_qrcode_set_dark_color(s_qr_code, COL_WHITE);
+    lv_qrcode_set_light_color(s_qr_code, COL_BG);
+    lv_qrcode_update(s_qr_code, data, strlen(data));
+    lv_obj_align(s_qr_code, LV_ALIGN_CENTER, 0, y_offset);
+
+    // Dark circle background behind logo so QR pixels don't show through
+    lv_obj_t *logo_bg = lv_obj_create(s_qr_code);
+    lv_obj_remove_style_all(logo_bg);
+    lv_obj_set_size(logo_bg, 40, 40);
+    lv_obj_set_style_bg_color(logo_bg, COL_BG, 0);
+    lv_obj_set_style_bg_opa(logo_bg, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(logo_bg, LV_RADIUS_CIRCLE, 0);
+    lv_obj_center(logo_bg);
+
+    // Overlay Spotify logo
+    lv_obj_t *logo_overlay = lv_image_create(s_qr_code);
+    lv_image_set_src(logo_overlay, &spotify_logo_32);
+    lv_obj_center(logo_overlay);
+
+    return s_qr_code;
+}
+
 static void show_logo_centered() {
     lv_image_set_src(s_logo, &spotify_logo_64);
     lv_image_set_scale(s_logo, 256); // 1:1 native 64px
@@ -302,8 +488,157 @@ static void show_logo_top() {
     lv_obj_clear_flag(s_logo, LV_OBJ_FLAG_HIDDEN);
 }
 
+// ─── Splash screen objects (temporary, deleted when splash ends)
+static lv_obj_t *s_splash = nullptr;
+static lv_obj_t *s_splash_status = nullptr;
+static lv_timer_t *s_splash_haptic_timer = nullptr;
+
+static void scale_cb(void *obj, int32_t v) {
+    lv_image_set_scale(static_cast<lv_obj_t *>(obj), static_cast<uint32_t>(v));
+}
+
+static void arc_angle_cb(void *obj, int32_t v) {
+    lv_arc_set_angles(static_cast<lv_obj_t *>(obj), v % 360, (v + 90) % 360);
+}
+
+void ui_show_splash() {
+    if (!display_lock(1000)) return;
+
+    // Full-screen splash container
+    s_splash = lv_obj_create(s_bg);
+    lv_obj_remove_style_all(s_splash);
+    lv_obj_set_size(s_splash, 360, 360);
+    lv_obj_center(s_splash);
+    lv_obj_clear_flag(s_splash, LV_OBJ_FLAG_SCROLLABLE);
+
+    // ─── Spinning ring around the logo
+    lv_obj_t *ring = lv_arc_create(s_splash);
+    lv_obj_set_size(ring, 120, 120);
+    lv_obj_align(ring, LV_ALIGN_CENTER, 0, -30);
+    lv_arc_set_rotation(ring, 0);
+    lv_arc_set_bg_angles(ring, 0, 360);
+    lv_arc_set_angles(ring, 0, 90);
+    lv_obj_remove_style(ring, nullptr, LV_PART_KNOB);
+    lv_obj_set_style_arc_width(ring, 2, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(ring, COL_GREEN, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_opa(ring, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_clear_flag(ring, LV_OBJ_FLAG_CLICKABLE);
+
+    // Spin the ring
+    lv_anim_t spin;
+    lv_anim_init(&spin);
+    lv_anim_set_var(&spin, ring);
+    lv_anim_set_values(&spin, 0, 360);
+    lv_anim_set_duration(&spin, 1500);
+    lv_anim_set_exec_cb(&spin, arc_angle_cb);
+    lv_anim_set_repeat_count(&spin, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_path_cb(&spin, lv_anim_path_linear);
+    lv_anim_start(&spin);
+
+    // Fade the ring in after a beat
+    lv_obj_set_style_opa(ring, LV_OPA_TRANSP, 0);
+    lv_anim_t ring_fade;
+    lv_anim_init(&ring_fade);
+    lv_anim_set_var(&ring_fade, ring);
+    lv_anim_set_values(&ring_fade, LV_OPA_TRANSP, LV_OPA_COVER);
+    lv_anim_set_duration(&ring_fade, 600);
+    lv_anim_set_delay(&ring_fade, 400);
+    lv_anim_set_exec_cb(&ring_fade, fade_opa_cb);
+    lv_anim_set_path_cb(&ring_fade, lv_anim_path_ease_out);
+    lv_anim_start(&ring_fade);
+
+    // ─── Logo — scale up from small + fade in
+    lv_obj_t *logo = lv_image_create(s_splash);
+    lv_image_set_src(logo, &spotify_logo_64);
+    lv_obj_align(logo, LV_ALIGN_CENTER, 0, -30);
+    lv_obj_set_style_opa(logo, LV_OPA_TRANSP, 0);
+    lv_image_set_scale(logo, 128); // start at 50%
+
+    // Scale 50% -> 100%
+    lv_anim_t zoom;
+    lv_anim_init(&zoom);
+    lv_anim_set_var(&zoom, logo);
+    lv_anim_set_values(&zoom, 128, 256);
+    lv_anim_set_duration(&zoom, 600);
+    lv_anim_set_exec_cb(&zoom, scale_cb);
+    lv_anim_set_path_cb(&zoom, lv_anim_path_overshoot);
+    lv_anim_start(&zoom);
+
+    // Fade in
+    lv_anim_t logo_fade;
+    lv_anim_init(&logo_fade);
+    lv_anim_set_var(&logo_fade, logo);
+    lv_anim_set_values(&logo_fade, LV_OPA_TRANSP, LV_OPA_COVER);
+    lv_anim_set_duration(&logo_fade, 500);
+    lv_anim_set_exec_cb(&logo_fade, fade_opa_cb);
+    lv_anim_set_path_cb(&logo_fade, lv_anim_path_ease_out);
+    lv_anim_start(&logo_fade);
+
+    // ─── Tagline — fade in with delay
+    lv_obj_t *tag = lv_label_create(s_splash);
+    lv_label_set_text(tag, "every knob\ndeserves music");
+    lv_obj_set_width(tag, 260);
+    lv_obj_set_style_text_color(tag, COL_GREY, 0);
+    lv_obj_set_style_text_font(tag, &geist_regular_16, 0);
+    lv_obj_set_style_text_align(tag, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(tag, LV_ALIGN_CENTER, 0, 55);
+    lv_obj_set_style_opa(tag, LV_OPA_TRANSP, 0);
+
+    lv_anim_t tag_fade;
+    lv_anim_init(&tag_fade);
+    lv_anim_set_var(&tag_fade, tag);
+    lv_anim_set_values(&tag_fade, LV_OPA_TRANSP, LV_OPA_COVER);
+    lv_anim_set_duration(&tag_fade, 600);
+    lv_anim_set_delay(&tag_fade, 300);
+    lv_anim_set_exec_cb(&tag_fade, fade_opa_cb);
+    lv_anim_set_path_cb(&tag_fade, lv_anim_path_ease_in);
+    lv_anim_start(&tag_fade);
+
+    // ─── Status line below tagline (hidden until scanning starts)
+    s_splash_status = lv_label_create(s_splash);
+    lv_label_set_text(s_splash_status, "");
+    lv_obj_set_width(s_splash_status, 260);
+    lv_obj_set_style_text_color(s_splash_status, COL_DIM, 0);
+    lv_obj_set_style_text_font(s_splash_status, &geist_regular_16, 0);
+    lv_obj_set_style_text_align(s_splash_status, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(s_splash_status, LV_ALIGN_CENTER, 0, 95);
+    lv_obj_add_flag(s_splash_status, LV_OBJ_FLAG_HIDDEN);
+
+    // Haptic pulse synced with the spinning ring
+    haptic_buzz(); // initial buzz on splash appear
+    s_splash_haptic_timer = lv_timer_create([](lv_timer_t *) {
+        haptic_buzz();
+    }, 1500, nullptr); // every 1.5s = one ring rotation
+
+    display_unlock();
+}
+
+void ui_splash_set_status(const char *msg) {
+    if (!display_lock(200)) return;
+    if (s_splash_status) {
+        lv_label_set_text(s_splash_status, msg);
+        lv_obj_clear_flag(s_splash_status, LV_OBJ_FLAG_HIDDEN);
+    }
+    display_unlock();
+}
+
+void ui_dismiss_splash() {
+    if (!display_lock(200)) return;
+    if (s_splash_haptic_timer) {
+        lv_timer_delete(s_splash_haptic_timer);
+        s_splash_haptic_timer = nullptr;
+    }
+    if (s_splash) {
+        lv_obj_delete(s_splash);
+        s_splash = nullptr;
+        s_splash_status = nullptr;
+    }
+    display_unlock();
+}
+
 void ui_set_status(const char *msg) {
     if (!display_lock(100)) return;
+    cleanup_qr();
     lv_obj_add_flag(s_art_img, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_play_icon, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_style_opa(s_progress_arc, LV_OPA_TRANSP, 0);
@@ -347,6 +682,7 @@ void ui_init() {
 
 void ui_update_state(const SpotifyState *state) {
     if (!display_lock(100)) return;
+    cleanup_qr();
 
     if (state->track[0] == '\0') {
         s_has_track = false;
@@ -388,9 +724,8 @@ void ui_update_state(const SpotifyState *state) {
     lv_label_set_text(s_lbl_track, state->track);
     lv_label_set_text(s_lbl_artist, state->artist);
 
-    // Pause overlay — use text characters since Geist fonts lack LVGL symbols
+    // Pause overlay
     if (!state->is_playing) {
-        lv_label_set_text(s_play_icon, "||");
         lv_obj_clear_flag(s_play_icon, LV_OBJ_FLAG_HIDDEN);
     } else {
         lv_obj_add_flag(s_play_icon, LV_OBJ_FLAG_HIDDEN);
@@ -424,7 +759,8 @@ void ui_update_state(const SpotifyState *state) {
         // Show pulsating loading placeholder
         lv_obj_add_flag(s_art_img, LV_OBJ_FLAG_HIDDEN);
         lv_obj_clear_flag(s_art_loading, LV_OBJ_FLAG_HIDDEN);
-        // Pulse animation
+        // Delete any existing pulse animation before starting a new one
+        lv_anim_delete(s_art_loading, fade_opa_cb);
         lv_anim_t pulse;
         lv_anim_init(&pulse);
         lv_anim_set_var(&pulse, s_art_loading);
@@ -479,6 +815,61 @@ void ui_update_state(const SpotifyState *state) {
     if (s_art_pixels) {
         lv_obj_clear_flag(s_art_img, LV_OBJ_FLAG_HIDDEN);
     }
+
+    display_unlock();
+}
+
+void ui_show_wifi_setup(const char *ap_name) {
+    if (!display_lock(1000)) return;
+
+    // Hide all playback UI
+    lv_obj_add_flag(s_art_img, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_art_loading, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_play_icon, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_opa(s_progress_arc, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_opa(s_vol_arc, LV_OPA_TRANSP, 0);
+    lv_label_set_text(s_lbl_track, "");
+    lv_label_set_text(s_lbl_artist, "");
+    lv_obj_add_flag(s_logo, LV_OBJ_FLAG_HIDDEN);
+
+    // QR code with Spotify logo overlay
+    char wifi_qr[128];
+    snprintf(wifi_qr, sizeof(wifi_qr), "WIFI:T:nopass;S:%s;;", ap_name);
+    create_branded_qr(s_bg, wifi_qr, 150, -35);
+
+    // Instructions
+    lv_obj_clear_flag(s_lbl_status, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_align(s_lbl_status, LV_ALIGN_CENTER, 0, 85);
+    char msg[128];
+    snprintf(msg, sizeof(msg), "Scan to join \"%s\"\nthen set up WiFi", ap_name);
+    lv_label_set_text(s_lbl_status, msg);
+
+    display_unlock();
+}
+
+void ui_show_spotify_setup(const char *device_ip) {
+    if (!display_lock(1000)) return;
+
+    // Hide all playback UI
+    lv_obj_add_flag(s_art_img, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_art_loading, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_play_icon, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_opa(s_progress_arc, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_opa(s_vol_arc, LV_OPA_TRANSP, 0);
+    lv_label_set_text(s_lbl_track, "");
+    lv_label_set_text(s_lbl_artist, "");
+    lv_obj_add_flag(s_logo, LV_OBJ_FLAG_HIDDEN);
+
+    // QR code with Spotify logo overlay
+    char url[128];
+    snprintf(url, sizeof(url), "http://%s:8888/spotify", device_ip);
+    create_branded_qr(s_bg, url, 150, -35);
+
+    // Instructions
+    lv_obj_clear_flag(s_lbl_status, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_align(s_lbl_status, LV_ALIGN_CENTER, 0, 85);
+    lv_label_set_text(s_lbl_status,
+        "Scan to set up\nSpotify on your knob");
 
     display_unlock();
 }
