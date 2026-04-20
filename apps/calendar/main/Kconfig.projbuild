@@ -1,0 +1,74 @@
+menu "Calendar"
+
+    config CALENDAR_ICAL_URL
+        string "Google Calendar iCal URL"
+        default ""
+        help
+            Secret iCal URL from Google Calendar settings.
+            Go to: Google Calendar → Settings → [calendar] → "Secret address in iCal format"
+
+    config CALENDAR_TIMEZONE
+        string "POSIX timezone string"
+        default "CET-1CEST,M3.5.0,M10.5.0/3"
+        help
+            POSIX TZ string for local time display. Default is Oslo (CET/CEST).
+
+    config CALENDAR_FETCH_INTERVAL_S
+        int "Calendar fetch interval (seconds)"
+        default 300
+        range 60 3600
+        help
+            How often to re-fetch the iCal feed. Default: 5 minutes.
+
+    config CALENDAR_WEATHER_LAT
+        string "Weather forecast latitude"
+        default "59.9264"
+        help
+            Latitude for YR/met.no weather forecast.
+            Default: Birkelunden, Oslo (59.9264)
+
+    config CALENDAR_WEATHER_LON
+        string "Weather forecast longitude"
+        default "10.7602"
+        help
+            Longitude for YR/met.no weather forecast.
+            Default: Birkelunden, Oslo (10.7602)
+
+endmenu
+
+# ─── Compatibility with shared knob_storage component ────────────────────────
+# knob_storage/settings.cpp references CONFIG_RADIO_* symbols at compile time.
+# We provide them here with sensible defaults so the shared component builds
+# without modification for non-radio apps.
+
+menu "Radio (compat)"
+
+    config RADIO_WIFI_SSID
+        string "WiFi SSID (compat)"
+        default ""
+
+    config RADIO_WIFI_PASSWORD
+        string "WiFi password (compat)"
+        default ""
+
+    config RADIO_WIFI_MAX_RETRIES
+        int "WiFi max retries (compat)"
+        default 5
+
+    config RADIO_VOLUME_DEFAULT
+        int "Default volume (compat)"
+        default 33
+
+    config RADIO_SONOS_SPEAKER_IP
+        string "Sonos speaker IP (compat)"
+        default ""
+
+    config RADIO_SONOS_POLL_INTERVAL_MS
+        int "Sonos poll interval (compat)"
+        default 2000
+
+    config RADIO_OPENAI_API_KEY
+        string "OpenAI API key (compat)"
+        default ""
+
+endmenu

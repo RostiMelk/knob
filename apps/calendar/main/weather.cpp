@@ -187,7 +187,7 @@ static bool fetch_and_parse() {
   snprintf(url, sizeof(url),
            "https://api.met.no/weatherapi/locationforecast/2.0/"
            "compact?lat=%s&lon=%s",
-           CONFIG_RADIO_WEATHER_LAT, CONFIG_RADIO_WEATHER_LON);
+           CONFIG_CALENDAR_WEATHER_LAT, CONFIG_CALENDAR_WEATHER_LON);
 
   auto *raw = static_cast<uint8_t *>(
       heap_caps_malloc(RESP_BUF_SIZE, MALLOC_CAP_SPIRAM));
@@ -401,6 +401,6 @@ void weather_start() {
 
   xTaskCreatePinnedToCore(weather_task, "weather", TASK_STACK, nullptr,
                           NET_TASK_PRIO - 1, &s_task, NET_TASK_CORE);
-  ESP_LOGI(TAG, "Started (lat=%s, lon=%s)", CONFIG_RADIO_WEATHER_LAT,
-           CONFIG_RADIO_WEATHER_LON);
+  ESP_LOGI(TAG, "Started (lat=%s, lon=%s)", CONFIG_CALENDAR_WEATHER_LAT,
+           CONFIG_CALENDAR_WEATHER_LON);
 }

@@ -1,0 +1,6 @@
+# Local secrets — copy to sdkconfig.defaults.local and fill in your values.
+# This file is gitignored. Do not commit real credentials.
+
+CONFIG_CALENDAR_WIFI_SSID="your-wifi-ssid"
+CONFIG_CALENDAR_WIFI_PASSWORD="your-wifi-password"
+CONFIG_CALENDAR_ICAL_URL=""
