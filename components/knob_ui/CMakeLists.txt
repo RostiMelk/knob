@@ -4,6 +4,7 @@ idf_component_register(
         "src/squircle.cpp"
         "src/art_decoder.cpp"
         "src/tjpgd/tjpgd.c"
+        "src/lucide_22.c"
     INCLUDE_DIRS
         "include"
     REQUIRES

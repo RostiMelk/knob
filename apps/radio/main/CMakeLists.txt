@@ -1,10 +1,13 @@
 set(SRCS
     "main.cpp"
+    "weather.cpp"
+    "fonts/geist_regular_20.c"
     "fonts/geist_regular_18.c"
     "fonts/geist_regular_16.c"
     "fonts/geist_regular_22.c"
     "fonts/geist_medium_28.c"
     "fonts/geist_medium_52.c"
+    "fonts/lucide_weather_20.c"
     "ui/images/nrj.c"
     "ui/images/nrk_jazz.c"
     "ui/images/nrk_mp3.c"
@@ -41,6 +44,7 @@ idf_component_register(
         esp_event
         esp_timer
         esp_http_client
+        json
         esp_wifi
         nvs_flash
     PRIV_REQUIRES

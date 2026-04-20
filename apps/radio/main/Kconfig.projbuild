@@ -45,6 +45,20 @@ menu "Sonos Radio"
               UK:          GMT0BST,M3.5.0/1,M10.5.0
               Japan:       JST-9
 
+    config RADIO_WEATHER_LAT
+        string "Weather forecast latitude"
+        default "59.9264"
+        help
+            Latitude for YR/met.no weather forecast.
+            Default: Birkelunden, Oslo (59.9264)
+
+    config RADIO_WEATHER_LON
+        string "Weather forecast longitude"
+        default "10.7602"
+        help
+            Longitude for YR/met.no weather forecast.
+            Default: Birkelunden, Oslo (10.7602)
+
     config RADIO_OPENAI_API_KEY
         string "OpenAI API key for voice mode"
         default ""

@@ -2,6 +2,7 @@
 
 #include "app_config.h"
 #include "discovery.h"
+#include "weather.h"
 
 void ui_init();
 
@@ -11,6 +12,7 @@ void ui_set_media_info(const MediaInfo *info);
 void ui_set_station(int index);
 void ui_set_wifi_status(bool connected);
 void ui_set_speaker_name(const char *name);
+void ui_set_weather(const WeatherData *data);
 
 void ui_show_speaker_picker(const DiscoveryResult *speakers);
 void ui_show_scanning();

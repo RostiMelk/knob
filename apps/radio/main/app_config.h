@@ -3,8 +3,9 @@
 #include "hal_pins.h"
 #include "knob_events.h"
 #include "sonos_config.h"
-#include "voice_config.h"
 #include "timer_events.h"
+#include "voice_config.h"
+#include "weather.h"
 
 // ─── Radio Stations ─────────────────────────────────────────────────────────
 
