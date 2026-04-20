@@ -16,7 +16,7 @@
 #include <initializer_list>
 
 static constexpr const char *TAG = "weather";
-static constexpr int FETCH_INTERVAL_MS = 30 * 60 * 1000;
+static constexpr int FETCH_INTERVAL_MS = 5 * 60 * 1000;
 static constexpr int RESP_BUF_SIZE = 48 * 1024;
 static constexpr int TASK_STACK = 8192;
 static constexpr const char *USER_AGENT =
@@ -294,16 +294,13 @@ static bool fetch_and_parse() {
       }
     }
 
-    // Parse forecast entries at ~3-hour intervals
+    // Parse forecast entries, skipping nighttime hours (23:00–05:59)
     int series_count = cJSON_GetArraySize(series);
-    static constexpr int FORECAST_INDICES[] = {3, 7, 11, 15};
     s_data.forecast_count = 0;
+    int last_hour = -1;
 
-    for (int fi = 0; fi < FORECAST_MAX; fi++) {
-      int idx = FORECAST_INDICES[fi];
-      if (idx >= series_count)
-        break;
-
+    for (int idx = 1;
+         idx < series_count && s_data.forecast_count < FORECAST_MAX; idx++) {
       cJSON *entry = cJSON_GetArrayItem(series, idx);
       cJSON *etime = entry ? cJSON_GetObjectItem(entry, "time") : nullptr;
       cJSON *edata = entry ? cJSON_GetObjectItem(entry, "data") : nullptr;
@@ -313,6 +310,19 @@ static bool fetch_and_parse() {
       // Extract hour from "YYYY-MM-DDThh:mm:ssZ"
       const char *tstr = etime->valuestring;
       int hour = (tstr[11] - '0') * 10 + (tstr[12] - '0');
+
+      // Skip nighttime hours
+      if (hour >= 23 || hour < 6)
+        continue;
+
+      // Keep ~3h spacing between entries
+      if (last_hour >= 0) {
+        int gap = hour - last_hour;
+        if (gap < 0)
+          gap += 24; // wrapped past midnight
+        if (gap < 3)
+          continue;
+      }
 
       // Temperature
       cJSON *einst = cJSON_GetObjectItem(edata, "instant");
@@ -356,6 +366,7 @@ static bool fetch_and_parse() {
         fc.color = COL_CLOUD;
       }
 
+      last_hour = hour;
       s_data.forecast_count++;
     }
   }
