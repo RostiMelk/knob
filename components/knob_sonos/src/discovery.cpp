@@ -26,7 +26,8 @@ static constexpr const char *MSEARCH =
     "ST: urn:schemas-upnp-org:device:ZonePlayer:1\r\n"
     "\r\n";
 
-// ─── Helpers ────────────────────────────────────────────────────────────────────────────────
+// ─── Helpers
+// ────────────────────────────────────────────────────────────────────────────────
 
 static bool parse_location(const char *response, char *out, size_t out_len) {
   const char *loc = strcasestr(response, "LOCATION:");
@@ -82,7 +83,8 @@ static bool already_found(const DiscoveryResult *result, const char *ip) {
   return false;
 }
 
-// ─── Fetch Device Description XML ─────────────────────────────────────────────────────────────
+// ─── Fetch Device Description XML
+// ─────────────────────────────────────────────────────────────
 
 struct HttpBuf {
   char *data;
@@ -161,21 +163,44 @@ static constexpr const char *ZONE_GROUP_TOPOLOGY_PATH =
 static constexpr const char *ZONE_GROUP_NS =
     "urn:schemas-upnp-org:service:ZoneGroupTopology:1";
 static constexpr const char *GET_ZONE_GROUP_STATE_BODY =
-    "<u:GetZoneGroupState xmlns:u=\"urn:schemas-upnp-org:service:ZoneGroupTopology:1\">"
+    "<u:GetZoneGroupState "
+    "xmlns:u=\"urn:schemas-upnp-org:service:ZoneGroupTopology:1\">"
     "<InstanceID>0</InstanceID>"
     "</u:GetZoneGroupState>";
 
 // Extract attribute value from an XML tag string
 // e.g. extract_attr(tag, "UUID") from 'UUID="RINCON_xxx"'
-static bool extract_attr(const char *xml, const char *attr_name,
-                         char *out, size_t out_len) {
+static bool extract_attr(const char *xml, const char *attr_name, char *out,
+                         size_t out_len) {
   char needle[64];
   snprintf(needle, sizeof(needle), "%s=\"", attr_name);
   const char *start = strstr(xml, needle);
-  if (!start) return false;
+  if (!start)
+    return false;
   start += strlen(needle);
   const char *end = strchr(start, '"');
-  if (!end) return false;
+  if (!end)
+    return false;
+  size_t len = std::min(static_cast<size_t>(end - start), out_len - 1);
+  memcpy(out, start, len);
+  out[len] = '\0';
+  return true;
+}
+
+// Like extract_attr but only searches within [xml, boundary).
+// Use this to avoid attribute leakage across adjacent XML tags.
+static bool extract_attr_bounded(const char *xml, const char *boundary,
+                                 const char *attr_name, char *out,
+                                 size_t out_len) {
+  char needle[64];
+  snprintf(needle, sizeof(needle), "%s=\"", attr_name);
+  const char *start = strstr(xml, needle);
+  if (!start || start >= boundary)
+    return false;
+  start += strlen(needle);
+  const char *end = strchr(start, '"');
+  if (!end || end >= boundary)
+    return false;
   size_t len = std::min(static_cast<size_t>(end - start), out_len - 1);
   memcpy(out, start, len);
   out[len] = '\0';
@@ -186,35 +211,49 @@ static bool extract_attr(const char *xml, const char *attr_name,
 static void xml_entity_decode(char *s) {
   char *r = s, *w = s;
   while (*r) {
-    if (strncmp(r, "&lt;", 4) == 0)       { *w++ = '<'; r += 4; }
-    else if (strncmp(r, "&gt;", 4) == 0)  { *w++ = '>'; r += 4; }
-    else if (strncmp(r, "&quot;", 6) == 0) { *w++ = '"'; r += 6; }
-    else if (strncmp(r, "&amp;", 5) == 0)  { *w++ = '&'; r += 5; }
-    else if (strncmp(r, "&apos;", 6) == 0) { *w++ = '\''; r += 6; }
-    else { *w++ = *r++; }
+    if (strncmp(r, "&lt;", 4) == 0) {
+      *w++ = '<';
+      r += 4;
+    } else if (strncmp(r, "&gt;", 4) == 0) {
+      *w++ = '>';
+      r += 4;
+    } else if (strncmp(r, "&quot;", 6) == 0) {
+      *w++ = '"';
+      r += 6;
+    } else if (strncmp(r, "&amp;", 5) == 0) {
+      *w++ = '&';
+      r += 5;
+    } else if (strncmp(r, "&apos;", 6) == 0) {
+      *w++ = '\'';
+      r += 6;
+    } else {
+      *w++ = *r++;
+    }
   }
   *w = '\0';
 }
 
-// Query GetZoneGroupState and build coordinator-only speaker list.
-// Returns true if successful (out->count updated with coordinators).
+// Query GetZoneGroupState and build speaker list with ALL visible members.
+// Coordinators get grouped=false, non-coordinator members get grouped=true.
+// Invisible members (stereo pair right channels) are skipped.
 static bool resolve_coordinators(const char *any_speaker_ip, int port,
                                  DiscoveryResult *out) {
   // Build SOAP envelope
   char envelope[512];
   snprintf(envelope, sizeof(envelope),
-    "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
-    "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\""
-    " s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">"
-    "<s:Body>%s</s:Body>"
-    "</s:Envelope>", GET_ZONE_GROUP_STATE_BODY);
+           "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
+           "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\""
+           " s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">"
+           "<s:Body>%s</s:Body>"
+           "</s:Envelope>",
+           GET_ZONE_GROUP_STATE_BODY);
 
   char url[80];
   snprintf(url, sizeof(url), "http://%s:%d%s", any_speaker_ip, port,
            ZONE_GROUP_TOPOLOGY_PATH);
 
   // Response buffer — ZoneGroupState can be large
-  static char resp_buf[8192];
+  static char resp_buf[16384];
   HttpBuf buf = {resp_buf, 0, static_cast<int>(sizeof(resp_buf))};
 
   esp_http_client_config_t cfg = {};
@@ -225,7 +264,8 @@ static bool resolve_coordinators(const char *any_speaker_ip, int port,
   cfg.user_data = &buf;
 
   auto *client = esp_http_client_init(&cfg);
-  if (!client) return false;
+  if (!client)
+    return false;
 
   esp_http_client_set_header(client, "Content-Type",
                              "text/xml; charset=\"utf-8\"");
@@ -254,13 +294,12 @@ static bool resolve_coordinators(const char *any_speaker_ip, int port,
 
   ESP_LOGI(TAG, "ZoneGroupState decoded (%d bytes): %.300s", buf.len, resp_buf);
 
-  // Parse ZoneGroup entries — each has a Coordinator="RINCON_xxx" attribute
-  // Find each ZoneGroup and extract the coordinator's Location and ZoneName
+  // Parse ZoneGroup entries — emit ALL visible members from every group.
+  // Invisible members (stereo pair right channels) are skipped.
   memset(out, 0, sizeof(*out));
 
   const char *zg = resp_buf;
-  while ((zg = strstr(zg, "ZoneGroup ")) != nullptr &&
-         out->count < DISCOVERY_MAX_SPEAKERS) {
+  while ((zg = strstr(zg, "ZoneGroup ")) != nullptr) {
     // Extract Coordinator UUID from ZoneGroup tag
     char coord_uuid[64] = {};
     if (!extract_attr(zg, "Coordinator", coord_uuid, sizeof(coord_uuid))) {
@@ -268,51 +307,79 @@ static bool resolve_coordinators(const char *any_speaker_ip, int port,
       continue;
     }
 
-    // Find the ZoneGroupMember with this UUID (the coordinator)
-    // Search within this ZoneGroup (up to next </ZoneGroup>)
+    // Find the end of this ZoneGroup
     const char *zg_end = strstr(zg, "</ZoneGroup>");
-    if (!zg_end) zg_end = resp_buf + buf.len;
+    if (!zg_end)
+      zg_end = resp_buf + buf.len;
 
-    // Look for the member matching the coordinator UUID
+    // Count visible (non-Invisible) members in this group to detect grouping
+    int visible_count = 0;
+    const char *scan = zg;
+    while (scan < zg_end &&
+           (scan = strstr(scan, "ZoneGroupMember ")) != nullptr &&
+           scan < zg_end) {
+      // Find the end of this specific member tag (/>)
+      const char *tag_end = strstr(scan, "/>");
+      if (!tag_end || tag_end > zg_end)
+        tag_end = zg_end;
+      char invis[8] = {};
+      extract_attr_bounded(scan, tag_end, "Invisible", invis, sizeof(invis));
+      if (strcmp(invis, "1") != 0)
+        visible_count++;
+      scan++;
+    }
+    bool is_group = visible_count > 1;
+
+    // Iterate all members and emit visible ones
     const char *member = zg;
-    bool found = false;
     while (member < zg_end &&
            (member = strstr(member, "ZoneGroupMember ")) != nullptr &&
-           member < zg_end) {
+           member < zg_end && out->count < DISCOVERY_MAX_SPEAKERS) {
+      // Find the end of this specific member tag to scope attribute search
+      const char *tag_end = strstr(member, "/>");
+      if (!tag_end || tag_end > zg_end)
+        tag_end = zg_end;
+
+      // Skip invisible members (stereo pair right channels)
+      char invis[8] = {};
+      extract_attr_bounded(member, tag_end, "Invisible", invis, sizeof(invis));
+      if (strcmp(invis, "1") == 0) {
+        member++;
+        continue;
+      }
+
       char uuid[64] = {};
-      if (extract_attr(member, "UUID", uuid, sizeof(uuid)) &&
-          strcmp(uuid, coord_uuid) == 0) {
-        // This is the coordinator member — extract Location and ZoneName
-        char location[256] = {};
-        char zone_name[64] = {};
+      char location[256] = {};
+      char zone_name[64] = {};
+      extract_attr_bounded(member, tag_end, "UUID", uuid, sizeof(uuid));
+      extract_attr_bounded(member, tag_end, "Location", location,
+                           sizeof(location));
+      extract_attr_bounded(member, tag_end, "ZoneName", zone_name,
+                           sizeof(zone_name));
 
-        extract_attr(member, "Location", location, sizeof(location));
-        extract_attr(member, "ZoneName", zone_name, sizeof(zone_name));
-
-        // Extract IP from Location URL
-        char ip[40] = {};
-        uint16_t member_port = 1400;
-        if (location[0] && extract_ip_from_url(location, ip, sizeof(ip), &member_port)) {
-          auto &speaker = out->speakers[out->count];
-          strncpy(speaker.ip, ip, sizeof(speaker.ip) - 1);
-          speaker.port = member_port;
-          if (zone_name[0]) {
-            strncpy(speaker.name, zone_name, sizeof(speaker.name) - 1);
-          } else {
-            snprintf(speaker.name, sizeof(speaker.name), "Sonos (%s)", ip);
-          }
-          ESP_LOGI(TAG, "Coordinator: %s at %s:%d (UUID: %s)",
-                   speaker.name, speaker.ip, speaker.port, coord_uuid);
-          out->count++;
-          found = true;
+      char ip[40] = {};
+      uint16_t member_port = 1400;
+      if (location[0] &&
+          extract_ip_from_url(location, ip, sizeof(ip), &member_port)) {
+        auto &speaker = out->speakers[out->count];
+        strncpy(speaker.ip, ip, sizeof(speaker.ip) - 1);
+        speaker.port = member_port;
+        strncpy(speaker.uuid, uuid, sizeof(speaker.uuid) - 1);
+        strncpy(speaker.coordinator_uuid, coord_uuid,
+                sizeof(speaker.coordinator_uuid) - 1);
+        speaker.grouped = is_group && strcmp(uuid, coord_uuid) != 0;
+        if (zone_name[0]) {
+          strncpy(speaker.name, zone_name, sizeof(speaker.name) - 1);
+        } else {
+          snprintf(speaker.name, sizeof(speaker.name), "Sonos (%s)", ip);
         }
-        break;
+        ESP_LOGI(TAG, "%s: %s at %s:%d (UUID: %s%s)",
+                 speaker.grouped ? "Grouped" : "Speaker", speaker.name,
+                 speaker.ip, speaker.port, uuid,
+                 speaker.grouped ? ", in group" : "");
+        out->count++;
       }
       member++;
-    }
-
-    if (!found) {
-      ESP_LOGW(TAG, "Could not resolve coordinator UUID: %s", coord_uuid);
     }
 
     zg = zg_end;
@@ -321,7 +388,8 @@ static bool resolve_coordinators(const char *any_speaker_ip, int port,
   return out->count > 0;
 }
 
-// ─── SSDP Multicast ─────────────────────────────────────────────────────────────────────
+// ─── SSDP Multicast
+// ─────────────────────────────────────────────────────────────────────
 
 static int send_msearch(int sock) {
   struct sockaddr_in dest = {};
@@ -338,7 +406,8 @@ static int send_msearch(int sock) {
   return sent;
 }
 
-// ─── Public API ─────────────────────────────────────────────────────────────────────
+// ─── Public API
+// ─────────────────────────────────────────────────────────────────────
 
 void discovery_init() { ESP_LOGI(TAG, "SSDP discovery ready"); }
 
@@ -399,7 +468,8 @@ int discovery_scan(DiscoveryResult *out, int timeout_ms) {
     if (first_ip[0] == '\0') {
       strncpy(first_ip, ip, sizeof(first_ip) - 1);
       first_port = port;
-      ESP_LOGI(TAG, "SSDP: found speaker at %s:%d — querying zone groups", ip, port);
+      ESP_LOGI(TAG, "SSDP: found speaker at %s:%d — querying zone groups", ip,
+               port);
       break; // One speaker is enough to query zone state
     }
   }
@@ -424,19 +494,33 @@ int discovery_scan(DiscoveryResult *out, int timeout_ms) {
   speaker.port = first_port;
 
   char fallback_url[256];
-  snprintf(fallback_url, sizeof(fallback_url), "http://%s:%d/xml/device_description.xml",
-           first_ip, first_port);
+  snprintf(fallback_url, sizeof(fallback_url),
+           "http://%s:%d/xml/device_description.xml", first_ip, first_port);
   if (!fetch_speaker_name(fallback_url, speaker.name, sizeof(speaker.name))) {
     snprintf(speaker.name, sizeof(speaker.name), "Sonos (%s)", first_ip);
   }
 
   out->count = 1;
-  ESP_LOGI(TAG, "Fallback: %s at %s:%d", speaker.name, speaker.ip, speaker.port);
+  ESP_LOGI(TAG, "Fallback: %s at %s:%d", speaker.name, speaker.ip,
+           speaker.port);
   return out->count;
 }
 
-bool discovery_get_speaker_name(const char *ip, int port, char *name, size_t name_len) {
+bool discovery_get_speaker_name(const char *ip, int port, char *name,
+                                size_t name_len) {
   char url[128];
-  snprintf(url, sizeof(url), "http://%s:%d/xml/device_description.xml", ip, port);
+  snprintf(url, sizeof(url), "http://%s:%d/xml/device_description.xml", ip,
+           port);
   return fetch_speaker_name(url, name, name_len);
+}
+
+const SonosSpeaker *discovery_find_by_name(const DiscoveryResult *result,
+                                           const char *name) {
+  if (!result || !name || !name[0])
+    return nullptr;
+  for (int i = 0; i < result->count; i++) {
+    if (strcmp(result->speakers[i].name, name) == 0)
+      return &result->speakers[i];
+  }
+  return nullptr;
 }

@@ -98,16 +98,55 @@ In a stereo pair, the right channel has `Invisible='1'` in SSDP responses. All c
 
 ## Speaker Discovery
 
-SSDP multicast scan runs once on first boot. Behavior:
+SSDP discovery runs **every time WiFi connects** — not just on first boot. This handles Sonos speakers changing IP addresses (common on most home networks). The flow:
 
-| Scenario                                                      | Action                                                |
-| ------------------------------------------------------------- | ----------------------------------------------------- |
-| One speaker found                                             | Auto-selected, saved to NVS                           |
-| Multiple speakers                                             | User picks from a list (encoder scroll, touch select) |
-| No speakers                                                   | Retry with backoff                                    |
-| `CONFIG_RADIO_SONOS_SPEAKER_IP` in `sdkconfig.defaults.local` | Skip discovery, use override                          |
+1. WiFi connects → discovery task starts, scanning overlay shown
+2. SSDP multicast finds at least one speaker on the network
+3. `GetZoneGroupState` SOAP call resolves all zone coordinators (handles stereo pairs)
+4. If a saved speaker name matches a discovered coordinator → IP is silently updated, auto-connect
+5. If no match (or no saved speaker) → picker UI is shown
 
-The selected speaker IP is persisted to NVS. Subsequent boots reconnect immediately without discovery.
+| Scenario                         | Action                                                             |
+| -------------------------------- | ------------------------------------------------------------------ |
+| Saved speaker found (same IP)    | Auto-connect, dismiss scanning overlay                             |
+| Saved speaker found (IP changed) | Update IP in NVS, auto-connect, log the move                       |
+| Saved speaker not found          | Show speaker picker (speaker may be off or renamed)                |
+| One speaker, first boot          | Auto-selected, saved to NVS                                        |
+| Multiple speakers                | User picks from card-style list (encoder scroll, touch/tap select) |
+| No speakers                      | Show picker with "No speakers found" + Rescan button               |
+
+Speaker matching uses the **room name** (stable across reboots) rather than IP (which changes). The name is persisted in NVS alongside the IP via `settings_set_speaker_name()`.
+
+### Rescan from Home Screen
+
+Tapping the speaker name label at the bottom of the home screen triggers `APP_EVENT_SPEAKER_RESCAN`, which stops the current connection and re-runs discovery with the picker always shown. This lets users switch speakers without a reboot.
+
+### Speaker Picker UI
+
+The picker is a separate LVGL screen (`s_scr_picker`) with:
+
+- **Scanning state**: animated spinner arc + "Scanning for speakers…" text (overlay on main screen)
+- **List state**: "Speakers" title, scrollable card-based list, Rescan button
+- **Cards**: dark rounded rectangles (240×50, radius 16) with room name; green dot marks the currently connected speaker
+- **Navigation**: encoder scrolls through cards (blue highlight), tap to select
+- **Back arrow**: shown when already connected (allows dismissing without changing speaker)
+
+---
+
+### Events
+
+| Event                      | Posted by | Purpose                                        |
+| -------------------------- | --------- | ---------------------------------------------- |
+| `APP_EVENT_SPEAKER_RESCAN` | UI        | User tapped speaker name → trigger rediscovery |
+
+### Key Functions
+
+| Function                   | File            | Purpose                                       |
+| -------------------------- | --------------- | --------------------------------------------- |
+| `discovery_scan()`         | `discovery.cpp` | SSDP + ZoneGroupState coordinator resolution  |
+| `discovery_find_by_name()` | `discovery.cpp` | Match saved speaker name in discovery results |
+| `select_speaker()`         | `ui.cpp`        | Set speaker, persist, dismiss picker          |
+| `rebuild_speaker_list()`   | `ui.cpp`        | Build the card-based picker screen            |
 
 ---
 

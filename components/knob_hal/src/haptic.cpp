@@ -29,6 +29,8 @@ static constexpr uint8_t MODE_INTERNAL_TRIGGER = 0x00;
 static constexpr uint8_t MODE_RESET = 0x80;
 static constexpr uint8_t LIBRARY_A = 0x01;
 static constexpr uint8_t EFFECT_STRONG_CLICK = 0x01;
+static constexpr uint8_t EFFECT_DOUBLE_CLICK = 0x0A;
+static constexpr uint8_t EFFECT_TRIPLE_CLICK = 0x0C;
 
 static i2c_master_dev_handle_t s_dev;
 static bool s_ready;
@@ -96,6 +98,24 @@ void haptic_buzz() {
     return;
 
   write_reg(REG_WAVESEQ1, EFFECT_STRONG_CLICK);
+  write_reg(REG_WAVESEQ2, 0x00);
+  write_reg(REG_GO, 0x01);
+}
+
+void haptic_buzz_double() {
+  if (!s_ready)
+    return;
+
+  write_reg(REG_WAVESEQ1, EFFECT_DOUBLE_CLICK);
+  write_reg(REG_WAVESEQ2, 0x00);
+  write_reg(REG_GO, 0x01);
+}
+
+void haptic_buzz_triple() {
+  if (!s_ready)
+    return;
+
+  write_reg(REG_WAVESEQ1, EFFECT_TRIPLE_CLICK);
   write_reg(REG_WAVESEQ2, 0x00);
   write_reg(REG_GO, 0x01);
 }

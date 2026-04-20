@@ -9,7 +9,11 @@ constexpr int DISCOVERY_TIMEOUT_MS = 3000;
 struct SonosSpeaker {
   char ip[40];
   char name[64];
+  char uuid[64];
+  char coordinator_uuid[64]; // UUID of the group coordinator (empty if
+                             // standalone)
   uint16_t port;
+  bool grouped; // true if this speaker is a non-coordinator member of a group
 };
 
 struct DiscoveryResult {
@@ -21,4 +25,10 @@ void discovery_init();
 int discovery_scan(DiscoveryResult *out, int timeout_ms = DISCOVERY_TIMEOUT_MS);
 
 // Fetch speaker room name from device description XML at ip:port
-bool discovery_get_speaker_name(const char *ip, int port, char *name, size_t name_len);
+bool discovery_get_speaker_name(const char *ip, int port, char *name,
+                                size_t name_len);
+
+// Find a speaker by room name in discovery results. Returns nullptr if not
+// found.
+const SonosSpeaker *discovery_find_by_name(const DiscoveryResult *result,
+                                           const char *name);

@@ -1,7 +1,7 @@
 #include "sonos.h"
-#include "sonos_config.h"
 #include "knob_events.h"
 #include "settings.h"
+#include "sonos_config.h"
 
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
@@ -90,6 +90,13 @@ static constexpr const char *NEXT_BODY =
     "<InstanceID>0</InstanceID>"
     "</u:Next>";
 
+static constexpr const char *SEEK_START_BODY =
+    "<u:Seek xmlns:u=\"" AV_TRANSPORT_NS "\">"
+    "<InstanceID>0</InstanceID>"
+    "<Unit>REL_TIME</Unit>"
+    "<Target>00:00:00</Target>"
+    "</u:Seek>";
+
 // ─── Command Queue ──────────────────────────────────────────────────────────
 
 enum class CmdType : uint8_t {
@@ -99,7 +106,8 @@ enum class CmdType : uint8_t {
   Stop,
   SetVolume,
   Previous,
-  Next
+  Next,
+  SeekStart,
 };
 
 struct Command {
@@ -115,6 +123,16 @@ static TaskHandle_t s_task;
 static volatile bool s_running;
 static char s_speaker_ip[40];
 static int s_speaker_port = SONOS_PORT;
+
+// ─── Group Members (speakers grouped with the coordinator) ──────────────────
+
+struct GroupMember {
+  char ip[40];
+  int port;
+};
+static constexpr int MAX_GROUP_MEMBERS = 8;
+static GroupMember s_group[MAX_GROUP_MEMBERS];
+static int s_group_count = 0;
 
 // ─── Registered Station URLs (set by app via sonos_set_stations) ────────────
 
@@ -403,23 +421,76 @@ static void exec_pause() {
   soap_fire(AV_TRANSPORT_PATH, "Pause", AV_TRANSPORT_NS, PAUSE_BODY);
 }
 
+static void poll_state();
+
 static void exec_previous() {
   soap_fire(AV_TRANSPORT_PATH, "Previous", AV_TRANSPORT_NS, PREVIOUS_BODY);
+  vTaskDelay(pdMS_TO_TICKS(500));
+  poll_state();
 }
 
 static void exec_next() {
   soap_fire(AV_TRANSPORT_PATH, "Next", AV_TRANSPORT_NS, NEXT_BODY);
+  vTaskDelay(pdMS_TO_TICKS(500));
+  poll_state();
+}
+
+static void exec_seek_start() {
+  soap_fire(AV_TRANSPORT_PATH, "Seek", AV_TRANSPORT_NS, SEEK_START_BODY);
+  vTaskDelay(pdMS_TO_TICKS(500));
+  poll_state();
 }
 
 static void exec_stop_playback() {
   soap_fire(AV_TRANSPORT_PATH, "Stop", AV_TRANSPORT_NS, STOP_BODY);
 }
 
+// Send Stop directly to a specific speaker IP (bypasses queue and global state)
+static bool soap_fire_at(const char *ip, int port, const char *path,
+                         const char *action_name, const char *ns,
+                         const char *body) {
+  char url[80];
+  snprintf(url, sizeof(url), "http://%s:%d%s", ip, port, path);
+
+  char soap_action[128];
+  snprintf(soap_action, sizeof(soap_action), "\"%s#%s\"", ns, action_name);
+
+  char envelope[1024];
+  int envelope_len =
+      snprintf(envelope, sizeof(envelope), SOAP_ENVELOPE_FMT, body);
+  if (envelope_len < 0 || envelope_len >= static_cast<int>(sizeof(envelope)))
+    return false;
+
+  esp_http_client_config_t cfg = {};
+  cfg.url = url;
+  cfg.method = HTTP_METHOD_POST;
+  cfg.timeout_ms = SONOS_HTTP_TIMEOUT_MS;
+
+  auto *client = esp_http_client_init(&cfg);
+  if (!client)
+    return false;
+
+  esp_http_client_set_header(client, "Content-Type",
+                             "text/xml; charset=\"utf-8\"");
+  esp_http_client_set_header(client, "SOAPAction", soap_action);
+  esp_http_client_set_post_field(client, envelope, envelope_len);
+
+  esp_err_t err = esp_http_client_perform(client);
+  esp_http_client_cleanup(client);
+  return err == ESP_OK;
+}
+
 static void exec_set_volume(int level) {
+  int clamped = std::clamp(level, VOLUME_MIN, VOLUME_MAX);
   char inner[256];
-  snprintf(inner, sizeof(inner), SET_VOLUME_FMT,
-           std::clamp(level, VOLUME_MIN, VOLUME_MAX));
+  snprintf(inner, sizeof(inner), SET_VOLUME_FMT, clamped);
   soap_fire(RENDERING_CONTROL_PATH, "SetVolume", RENDERING_CONTROL_NS, inner);
+
+  // Also set volume on all group members
+  for (int i = 0; i < s_group_count; i++) {
+    soap_fire_at(s_group[i].ip, s_group[i].port, RENDERING_CONTROL_PATH,
+                 "SetVolume", RENDERING_CONTROL_NS, inner);
+  }
 }
 
 // ─── Polling ────────────────────────────────────────────────────────────────
@@ -528,6 +599,9 @@ static void net_task(void *) {
       case CmdType::Next:
         exec_next();
         break;
+      case CmdType::SeekStart:
+        exec_seek_start();
+        break;
       }
     }
 
@@ -615,6 +689,98 @@ void sonos_next() {
   Command cmd = {.type = CmdType::Next, .uri = {}};
   enqueue(cmd);
 }
+
+void sonos_seek_start() {
+  Command cmd = {.type = CmdType::SeekStart, .uri = {}};
+  enqueue(cmd);
+}
+
+void sonos_stop_playback_at(const char *ip, int port) {
+  ESP_LOGI(TAG, "Stopping playback on %s:%d", ip, port);
+  soap_fire_at(ip, port, AV_TRANSPORT_PATH, "Stop", AV_TRANSPORT_NS, STOP_BODY);
+}
+
+void sonos_group_speaker(const char *target_ip, int target_port,
+                         const char *coordinator_uuid) {
+  char body[512];
+  snprintf(body, sizeof(body),
+           "<u:SetAVTransportURI xmlns:u=\"" AV_TRANSPORT_NS "\">"
+           "<InstanceID>0</InstanceID>"
+           "<CurrentURI>x-rincon:%s</CurrentURI>"
+           "<CurrentURIMetaData></CurrentURIMetaData>"
+           "</u:SetAVTransportURI>",
+           coordinator_uuid);
+
+  ESP_LOGI(TAG, "Grouping %s:%d with coordinator %s", target_ip, target_port,
+           coordinator_uuid);
+  soap_fire_at(target_ip, target_port, AV_TRANSPORT_PATH, "SetAVTransportURI",
+               AV_TRANSPORT_NS, body);
+
+  // Track as group member
+  if (s_group_count < MAX_GROUP_MEMBERS) {
+    auto &m = s_group[s_group_count++];
+    strncpy(m.ip, target_ip, sizeof(m.ip) - 1);
+    m.ip[sizeof(m.ip) - 1] = '\0';
+    m.port = target_port;
+    ESP_LOGI(TAG, "Group now has %d member(s)", s_group_count);
+  }
+}
+
+void sonos_clear_group() {
+  static constexpr const char *STANDALONE_BODY =
+      "<u:BecomeCoordinatorOfStandaloneGroup "
+      "xmlns:u=\"" AV_TRANSPORT_NS "\">"
+      "<InstanceID>0</InstanceID>"
+      "</u:BecomeCoordinatorOfStandaloneGroup>";
+
+  for (int i = 0; i < s_group_count; i++) {
+    ESP_LOGI(TAG, "Ungrouping %s:%d", s_group[i].ip, s_group[i].port);
+    soap_fire_at(s_group[i].ip, s_group[i].port, AV_TRANSPORT_PATH,
+                 "BecomeCoordinatorOfStandaloneGroup", AV_TRANSPORT_NS,
+                 STANDALONE_BODY);
+  }
+  s_group_count = 0;
+}
+
+void sonos_ungroup_speaker(const char *ip, int port) {
+  static constexpr const char *STANDALONE_BODY =
+      "<u:BecomeCoordinatorOfStandaloneGroup "
+      "xmlns:u=\"" AV_TRANSPORT_NS "\">"
+      "<InstanceID>0</InstanceID>"
+      "</u:BecomeCoordinatorOfStandaloneGroup>";
+
+  ESP_LOGI(TAG, "Ungrouping %s:%d", ip, port);
+  soap_fire_at(ip, port, AV_TRANSPORT_PATH,
+               "BecomeCoordinatorOfStandaloneGroup", AV_TRANSPORT_NS,
+               STANDALONE_BODY);
+
+  // Remove from tracked group members
+  for (int i = 0; i < s_group_count; i++) {
+    if (strcmp(s_group[i].ip, ip) == 0 && s_group[i].port == port) {
+      s_group[i] = s_group[s_group_count - 1];
+      s_group_count--;
+      break;
+    }
+  }
+}
+
+void sonos_add_group_member(const char *ip, int port) {
+  // Avoid duplicates
+  for (int i = 0; i < s_group_count; i++) {
+    if (strcmp(s_group[i].ip, ip) == 0 && s_group[i].port == port)
+      return;
+  }
+  if (s_group_count < MAX_GROUP_MEMBERS) {
+    auto &m = s_group[s_group_count++];
+    strncpy(m.ip, ip, sizeof(m.ip) - 1);
+    m.ip[sizeof(m.ip) - 1] = '\0';
+    m.port = port;
+    ESP_LOGI(TAG, "Tracked group member %s:%d (%d total)", ip, port,
+             s_group_count);
+  }
+}
+
+int sonos_group_count() { return s_group_count; }
 
 int sonos_fetch_art(const char *url, uint8_t *buf, int buf_size) {
   if (!url || !url[0] || !buf || buf_size <= 0)
