@@ -1,11 +1,12 @@
 #include "app_config.h"
+#include "discovery.h"
 #include "encoder.h"
 #include "haptic.h"
-#include "wifi_manager.h"
-#include "discovery.h"
-#include "sonos.h"
 #include "settings.h"
+#include "sonos.h"
 #include "timer.h"
+#include "weather.h"
+#include "wifi_manager.h"
 
 #include "ui/ui.h"
 #include "ui/ui_timer.h"
@@ -81,6 +82,13 @@ static void on_timer_fired(void *, esp_event_base_t, int32_t, void *data) {
   haptic_buzz();
 }
 
+// ─── Weather Events ─────────────────────────────────────────────────────────
+
+static void on_weather_update(void *, esp_event_base_t, int32_t, void *data) {
+  auto *w = static_cast<WeatherData *>(data);
+  ui_set_weather(w);
+}
+
 // ─── Voice Mode Events ──────────────────────────────────────────────────────
 
 static void on_voice_activate(void *, esp_event_base_t, int32_t, void *) {
@@ -148,6 +156,7 @@ static void start_with_saved_speaker() {
 static void on_wifi_connected(void *, esp_event_base_t, int32_t, void *) {
   ESP_LOGI(TAG, "WiFi connected");
   ui_set_wifi_status(true);
+  weather_start();
 
   // Set timezone and start NTP sync (idempotent — safe on reconnect)
   setenv("TZ", CONFIG_RADIO_TIMEZONE, 1);
@@ -243,6 +252,8 @@ static void register_events() {
                              nullptr);
   esp_event_handler_register(APP_EVENT, APP_EVENT_VOICE_TRANSCRIPT,
                              on_voice_transcript, nullptr);
+  esp_event_handler_register(APP_EVENT, APP_EVENT_WEATHER_UPDATE,
+                             on_weather_update, nullptr);
 }
 
 static void start_timer_tick() {
@@ -275,6 +286,7 @@ extern "C" void app_main() {
     station_urls[i] = STATIONS[i].url;
   sonos_set_stations(station_urls, STATION_COUNT);
 
+  weather_init();
   timer_init();
   ui_timer_init();
   voice_tools_init();
