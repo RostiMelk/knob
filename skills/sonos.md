@@ -119,7 +119,9 @@ Speaker matching uses the **room name** (stable across reboots) rather than IP (
 
 ### Rescan from Home Screen
 
-Tapping the speaker name label at the bottom of the home screen triggers `APP_EVENT_SPEAKER_RESCAN`, which stops the current connection and re-runs discovery with the picker always shown. This lets users switch speakers without a reboot.
+Swiping up on the home screen (iOS-style drawer sheet gesture) triggers `APP_EVENT_SPEAKER_RESCAN`, which stops the current connection and re-runs discovery with the picker always shown. This lets users switch speakers without a reboot.
+
+The gesture is detected in `on_screen_released` (`ui.cpp`): vertical travel ≥ 40px upward and greater than horizontal travel. The handler lives in `main.cpp` and spawns `discover_and_connect_task` on the net core.
 
 ### Speaker Picker UI
 
@@ -135,9 +137,9 @@ The picker is a separate LVGL screen (`s_scr_picker`) with:
 
 ### Events
 
-| Event                      | Posted by | Purpose                                        |
-| -------------------------- | --------- | ---------------------------------------------- |
-| `APP_EVENT_SPEAKER_RESCAN` | UI        | User tapped speaker name → trigger rediscovery |
+| Event                      | Posted by | Purpose                                      |
+| -------------------------- | --------- | -------------------------------------------- |
+| `APP_EVENT_SPEAKER_RESCAN` | UI        | User swiped up on home → trigger rediscovery |
 
 ### Key Functions
 

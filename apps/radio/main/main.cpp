@@ -10,9 +10,6 @@
 
 #include "ui/ui.h"
 #include "ui/ui_timer.h"
-#include "ui/ui_voice.h"
-#include "voice_task.h"
-#include "voice_tools.h"
 
 #include "esp_event.h"
 #include "esp_log.h"
@@ -87,35 +84,6 @@ static void on_timer_fired(void *, esp_event_base_t, int32_t, void *data) {
 static void on_weather_update(void *, esp_event_base_t, int32_t, void *data) {
   auto *w = static_cast<WeatherData *>(data);
   ui_set_weather(w);
-}
-
-// ─── Voice Mode Events ──────────────────────────────────────────────────────
-
-static void on_voice_activate(void *, esp_event_base_t, int32_t, void *) {
-  ESP_LOGI(TAG, "Voice mode activated");
-  voice_task_start();
-}
-
-static void on_voice_deactivate(void *, esp_event_base_t, int32_t, void *) {
-  ESP_LOGI(TAG, "Voice mode deactivated");
-  voice_task_stop();
-}
-
-static void on_voice_state(void *, esp_event_base_t, int32_t, void *data) {
-  auto state = *static_cast<VoiceState *>(data);
-  if (state == VoiceState::Inactive) {
-    voice_ui_exit();
-  } else {
-    voice_ui_set_state(state);
-  }
-}
-
-static void on_voice_transcript(void *, esp_event_base_t, int32_t, void *data) {
-  auto *text = static_cast<const char *>(data);
-  // Determine if this is user or AI text based on current voice state
-  // (Thinking = user just spoke, Speaking = AI responding)
-  // For now, show all transcripts as AI text (non-dimmed)
-  voice_ui_set_transcript(text, false);
 }
 
 static void discover_and_connect_task(void *) {
@@ -213,6 +181,13 @@ static void on_stop_requested(void *, esp_event_base_t, int32_t, void *) {
   sonos_stop_playback();
 }
 
+static void on_speaker_rescan(void *, esp_event_base_t, int32_t, void *) {
+  ESP_LOGI(TAG, "Speaker rescan requested");
+  sonos_stop();
+  xTaskCreatePinnedToCore(discover_and_connect_task, "discover", 10240, nullptr,
+                          NET_TASK_PRIO, nullptr, NET_TASK_CORE);
+}
+
 static void init_nvs() {
   esp_err_t err = nvs_flash_init();
   if (err == ESP_ERR_NVS_NO_FREE_PAGES ||
@@ -234,6 +209,8 @@ static void register_events() {
                              on_play_requested, nullptr);
   esp_event_handler_register(APP_EVENT, APP_EVENT_STOP_REQUESTED,
                              on_stop_requested, nullptr);
+  esp_event_handler_register(APP_EVENT, APP_EVENT_SPEAKER_RESCAN,
+                             on_speaker_rescan, nullptr);
   esp_event_handler_register(APP_EVENT, APP_EVENT_WIFI_CONNECTED,
                              on_wifi_connected, nullptr);
   esp_event_handler_register(APP_EVENT, APP_EVENT_WIFI_DISCONNECTED,
@@ -244,14 +221,6 @@ static void register_events() {
                              on_timer_started, nullptr);
   esp_event_handler_register(APP_EVENT, APP_EVENT_TIMER_FIRED, on_timer_fired,
                              nullptr);
-  esp_event_handler_register(APP_EVENT, APP_EVENT_VOICE_ACTIVATE,
-                             on_voice_activate, nullptr);
-  esp_event_handler_register(APP_EVENT, APP_EVENT_VOICE_DEACTIVATE,
-                             on_voice_deactivate, nullptr);
-  esp_event_handler_register(APP_EVENT, APP_EVENT_VOICE_STATE, on_voice_state,
-                             nullptr);
-  esp_event_handler_register(APP_EVENT, APP_EVENT_VOICE_TRANSCRIPT,
-                             on_voice_transcript, nullptr);
   esp_event_handler_register(APP_EVENT, APP_EVENT_WEATHER_UPDATE,
                              on_weather_update, nullptr);
 }
@@ -259,7 +228,7 @@ static void register_events() {
 static void start_timer_tick() {
   esp_timer_create_args_t args = {};
   args.callback = on_timer_tick;
-  args.name = "voice_timer";
+  args.name = "timer_tick";
   ESP_ERROR_CHECK(esp_timer_create(&args, &s_timer_tick_handle));
   ESP_ERROR_CHECK(esp_timer_start_periodic(s_timer_tick_handle, 1'000'000));
 }
@@ -289,8 +258,6 @@ extern "C" void app_main() {
   weather_init();
   timer_init();
   ui_timer_init();
-  voice_tools_init();
-  voice_task_init();
   start_timer_tick();
   wifi_manager_init();
 

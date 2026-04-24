@@ -59,12 +59,4 @@ menu "Sonos Radio"
             Longitude for YR/met.no weather forecast.
             Default: Birkelunden, Oslo (10.7602)
 
-    config RADIO_OPENAI_API_KEY
-        string "OpenAI API key for voice mode"
-        default ""
-        help
-            API key for OpenAI Realtime API. Required for voice assistant.
-            Set via .env file on SD card (OPENAI_API_KEY=sk-proj-...) or
-            pass directly here for development.
-
 endmenu

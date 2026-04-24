@@ -9,7 +9,6 @@
 #include "sonos.h"
 #include "ui/images/images.h"
 #include "ui/ui_timer.h"
-#include "ui/ui_voice.h"
 #include "ui_pages.h"
 
 #include "esp_heap_caps.h"
@@ -19,6 +18,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 
@@ -37,7 +37,7 @@ static constexpr const char *TAG = "ui";
 //    7s inactivity → cancel, revert, → VOLUME
 //
 
-enum class Mode { Volume, Browse, Voice };
+enum class Mode { Volume, Browse };
 
 static constexpr int BROWSE_TIMEOUT_MS = 15000;
 static constexpr int VOL_DISPLAY_MS = 1500;
@@ -158,6 +158,7 @@ static lv_timer_t *s_external_idle_timer;
 // Touch press detection (manual long-press via timer)
 static lv_timer_t *s_press_timer;
 static bool s_press_was_long;
+static lv_point_t s_press_point;
 
 // Backlight dimming
 static lv_timer_t *s_bl_timer;
@@ -172,11 +173,6 @@ static lv_image_dsc_t s_art_dsc; // LVGL image descriptor for decoded art
 static lv_obj_t *s_art_loading;
 static char s_art_last_url[256]; // Dedup — skip re-download if URL unchanged
 
-// Double-tap detection for voice mode
-static uint32_t s_last_tap_ms;
-static lv_timer_t *s_tap_delay_timer;
-static int s_pre_voice_volume;
-
 // Speaker picker
 static lv_obj_t *s_scr_picker;
 static lv_obj_t *s_picker_spinner;
@@ -185,8 +181,6 @@ static DiscoveryResult s_discovered;
 static int s_speaker_highlight;
 static bool s_on_picker;
 static char s_current_speaker[64];
-
-static lv_point_t s_press_point;
 
 // ─── Station Images (compiled into firmware as C arrays)
 // ────────────────────────────────────────────────────────
@@ -279,8 +273,6 @@ static bool home_should_idle();
 static void show_idle_ui(bool idle);
 static void do_tap();
 static void do_long_press();
-static void activate_voice();
-static void deactivate_voice();
 static void on_page_changed(int index, const char *id);
 static void on_encoder_poll(lv_timer_t *);
 static void on_prev_tap(lv_event_t *);
@@ -827,36 +819,6 @@ static void update_subtitle() {
 // ─── Touch
 // ────────────────────────────────────────────────────────────────────────────
 
-static void on_tap_delay(lv_timer_t *) {
-  lv_timer_pause(s_tap_delay_timer);
-  s_last_tap_ms = 0;
-  do_tap();
-}
-
-static void activate_voice() {
-  if (s_mode == Mode::Voice)
-    return;
-  if (s_mode == Mode::Browse)
-    exit_browse();
-
-  s_pre_voice_volume = s_volume;
-  s_mode = Mode::Voice;
-  voice_ui_enter();
-  sonos_set_volume(VOICE_DUCKED_VOLUME);
-  esp_event_post(APP_EVENT, APP_EVENT_VOICE_ACTIVATE, nullptr, 0, 0);
-}
-
-static void deactivate_voice() {
-  if (s_mode != Mode::Voice)
-    return;
-
-  voice_ui_exit();
-  s_mode = Mode::Volume;
-  sonos_set_volume(s_pre_voice_volume);
-  update_subtitle();
-  esp_event_post(APP_EVENT, APP_EVENT_VOICE_DEACTIVATE, nullptr, 0, 0);
-}
-
 static void do_tap() {
   if (s_on_picker) {
     if (s_discovered.count > 0 && s_speaker_highlight >= 0 &&
@@ -872,19 +834,12 @@ static void do_tap() {
   case Mode::Browse:
     confirm_browse();
     break;
-  case Mode::Voice:
-    break;
   }
 }
 
 static void do_long_press() {
   if (s_on_picker)
     return;
-
-  if (s_mode == Mode::Voice) {
-    deactivate_voice();
-    return;
-  }
 
   if (s_mode == Mode::Browse) {
     exit_browse();
@@ -919,30 +874,21 @@ static void on_screen_released(lv_event_t *) {
   if (s_press_was_long)
     return;
 
-  // Detect swipe-up: negative dy (finger moved toward top of screen)
+  // Detect swipe-up: finger moved toward top of screen → open speaker menu
   lv_point_t rel = {};
   lv_indev_t *indev = lv_indev_active();
   if (indev)
     lv_indev_get_point(indev, &rel);
-  int32_t dx = rel.x - s_press_point.x;
   int32_t dy = rel.y - s_press_point.y;
-  int32_t ady = dy < 0 ? -dy : dy;
-  int32_t adx = dx < 0 ? -dx : dx;
-  if (s_mode == Mode::Voice) {
-    deactivate_voice();
+  int32_t adx = std::abs(rel.x - s_press_point.x);
+  int32_t ady = std::abs(dy);
+  constexpr int32_t SWIPE_MIN_DIST = 40;
+  if (dy < -SWIPE_MIN_DIST && ady > adx && !s_on_picker) {
+    esp_event_post(APP_EVENT, APP_EVENT_SPEAKER_RESCAN, nullptr, 0, 0);
     return;
   }
 
-  uint32_t now = lv_tick_get();
-  if (s_last_tap_ms && (now - s_last_tap_ms) < DOUBLE_TAP_WINDOW_MS) {
-    s_last_tap_ms = 0;
-    lv_timer_pause(s_tap_delay_timer);
-    activate_voice();
-  } else {
-    s_last_tap_ms = now;
-    lv_timer_reset(s_tap_delay_timer);
-    lv_timer_resume(s_tap_delay_timer);
-  }
+  do_tap();
 }
 
 // ─── Main Screen
@@ -1473,24 +1419,33 @@ static void rebuild_speaker_list() {
 
   // Dismiss / Back button
   lv_obj_t *back_btn = lv_obj_create(s_scr_picker);
-  lv_obj_set_size(back_btn, 100, 40);
+  lv_obj_set_size(back_btn, 110, 40);
   lv_obj_align(back_btn, LV_ALIGN_BOTTOM_MID, 0, -37);
   lv_obj_set_style_bg_color(back_btn, lv_color_hex(0x2C2C2E), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(back_btn, LV_OPA_COVER, LV_PART_MAIN);
   lv_obj_set_style_border_width(back_btn, 0, LV_PART_MAIN);
   lv_obj_set_style_radius(back_btn, 20, LV_PART_MAIN);
+  lv_obj_set_style_pad_all(back_btn, 0, LV_PART_MAIN);
   lv_obj_remove_flag(back_btn, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_add_flag(back_btn, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_set_style_bg_color(
       back_btn, lv_color_hex(0x222222),
       static_cast<lv_style_selector_t>(LV_PART_MAIN | LV_STATE_PRESSED));
+  lv_obj_set_flex_flow(back_btn, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(back_btn, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                        LV_FLEX_ALIGN_CENTER);
+  lv_obj_set_style_pad_column(back_btn, 6, LV_PART_MAIN);
+
+  lv_obj_t *back_icon = lv_label_create(back_btn);
+  lv_obj_set_style_text_color(back_icon, COL_TEXT, LV_PART_MAIN);
+  lv_obj_set_style_text_font(back_icon, &lucide_22, LV_PART_MAIN);
+  lv_label_set_text(back_icon, s_current_speaker[0] ? ICON_ARROW_LEFT : ICON_X);
 
   lv_obj_t *back_lbl = lv_label_create(back_btn);
   lv_obj_set_style_text_color(back_lbl, COL_TEXT, LV_PART_MAIN);
   lv_obj_set_style_text_font(back_lbl, &geist_regular_16, LV_PART_MAIN);
-  lv_label_set_text(back_lbl,
-                    s_current_speaker[0] ? "\xE2\x86\x90 Back" : "Dismiss");
-  lv_obj_center(back_lbl);
+  lv_label_set_text(back_lbl, s_current_speaker[0] ? "Back" : "Dismiss");
+
   lv_obj_add_event_cb(back_btn, on_picker_dismiss, LV_EVENT_SHORT_CLICKED,
                       nullptr);
 }
@@ -1549,17 +1504,11 @@ void ui_init() {
     s_press_timer = lv_timer_create(on_press_timer, 500, nullptr);
     lv_timer_pause(s_press_timer);
 
-    s_tap_delay_timer =
-        lv_timer_create(on_tap_delay, DOUBLE_TAP_WINDOW_MS, nullptr);
-    lv_timer_pause(s_tap_delay_timer);
-
     s_external_idle_timer = lv_timer_create(on_external_idle_timeout,
                                             EXTERNAL_IDLE_TIMEOUT_MS, nullptr);
     lv_timer_pause(s_external_idle_timer);
 
     lv_timer_create(on_encoder_poll, ENCODER_POLL_MS, nullptr);
-
-    voice_ui_build(s_screen);
 
     show_idle_ui(true);
 
@@ -1980,39 +1929,6 @@ void ui_set_weather(const WeatherData *data) {
   display_unlock();
 }
 
-// ─── Voice Mode
-// ─────────────────────────────────────────────────────────────────────
-
-void ui_voice_activate() {
-  if (!display_lock(50))
-    return;
-  activate_voice();
-  display_unlock();
-}
-
-void ui_voice_deactivate() {
-  if (!display_lock(50))
-    return;
-  deactivate_voice();
-  display_unlock();
-}
-
-void ui_voice_set_state(VoiceState state) {
-  if (!display_lock(50))
-    return;
-  voice_ui_set_state(state);
-  display_unlock();
-}
-
-void ui_voice_set_transcript(const char *text, bool is_user) {
-  if (!display_lock(50))
-    return;
-  voice_ui_set_transcript(text, is_user);
-  display_unlock();
-}
-
-bool ui_is_voice_active() { return s_mode == Mode::Voice; }
-
 static void on_page_changed(int index, const char *id) {
   (void)id;
   if (index == 0) {
@@ -2038,9 +1954,6 @@ static void handle_encoder(int32_t steps) {
     }
     return;
   }
-
-  if (s_mode == Mode::Voice)
-    return;
 
   if (!pages_is_home()) {
     pages_navigate(steps > 0 ? 1 : -1);
@@ -2095,8 +2008,6 @@ static void handle_encoder(int32_t steps) {
     lv_timer_reset(s_browse_timer);
     break;
   }
-  case Mode::Voice:
-    break;
   }
 }
 
@@ -2119,9 +2030,7 @@ void ui_on_touch_tap() {
     return;
   backlight_poke();
   pages_poke();
-  if (s_mode == Mode::Voice)
-    deactivate_voice();
-  else if (!pages_is_home())
+  if (!pages_is_home())
     pages_go_home();
   else
     do_tap();

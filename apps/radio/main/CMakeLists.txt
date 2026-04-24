@@ -22,8 +22,6 @@ set(SRCS
     "ui/images/radio_rock.c"
     "ui/ui.cpp"
     "ui/ui_timer.cpp"
-    "ui/ui_voice.cpp"
-    "voice/tools_radio.cpp"
 )
 
 set(INCLUDE_DIRS
@@ -38,7 +36,6 @@ idf_component_register(
         knob_net
         knob_storage
         knob_ui
-        knob_voice
         knob_sonos
         knob_timer
         esp_event
