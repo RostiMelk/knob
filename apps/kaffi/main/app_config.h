@@ -22,6 +22,20 @@ static constexpr int KAFFI_URL_LEN = 200;
 // ─── Coffee action kinds
 enum KaffiKind { KAFFI_CUP = 0, KAFFI_BREW = 1 };
 
+// ─── Offices — name doubles as the directory location filter (GROQ `match`,
+// so "San Francisco" also catches people who typed a full address) and the
+// `office` value stamped on events.
+struct KaffiOffice {
+  const char *name;
+  const char *tz; // POSIX TZ — local-day math for streaks and Jan 1
+};
+static constexpr KaffiOffice KAFFI_OFFICES[] = {
+    {"Oslo", "CET-1CEST,M3.5.0,M10.5.0/3"},
+    {"San Francisco", "PST8PDT,M3.2.0,M11.1.0"},
+};
+static constexpr int KAFFI_OFFICE_COUNT =
+    sizeof(KAFFI_OFFICES) / sizeof(KAFFI_OFFICES[0]);
+
 // ─── A person plus their derived yearly stats (from the leaderboard query)
 struct Person {
   char id[KAFFI_ID_LEN];

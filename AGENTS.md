@@ -60,6 +60,9 @@ components/                    Shared ESP-IDF components
   knob_timer/                  Countdown timer with voice tool integration
     include/                   timer.h, timer_events.h
     src/                       timer.cpp
+  knob_setup/                  Captive-portal WiFi provisioning (QR + phone)
+    include/                   wifi_setup.h
+    src/                       wifi_setup.cpp
 apps/
   radio/                       Sonos radio app (main project)
     main/

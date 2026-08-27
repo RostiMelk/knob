@@ -8,6 +8,13 @@ void ui_init();
 /// Show the splash ("kaffi") screen.
 void ui_show_splash();
 
+/// Show the captive-portal QR screen (join instructions for `ap_name`).
+void ui_show_wifi_setup(const char *ap_name);
+
+/// First-boot office picker. Blocks the calling task until the user taps an
+/// office; returns its index into KAFFI_OFFICES. Not for the LVGL task.
+int ui_pick_office();
+
 /// Show a status message (connecting, errors, …).
 void ui_set_status(const char *msg);
 

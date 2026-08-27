@@ -60,6 +60,14 @@ export const coffeeEvent = defineType({
       validation: (rule) => rule.required().min(1).integer(),
     }),
     defineField({
+      name: "office",
+      type: "string",
+      readOnly: true,
+      description:
+        "Stamped by the device that recorded the event. Events without an " +
+        "office predate multi-office support — they're Oslo.",
+    }),
+    defineField({
       name: "occurredAt",
       title: "Occurred at",
       type: "datetime",

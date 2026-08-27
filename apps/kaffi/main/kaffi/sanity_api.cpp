@@ -1,5 +1,6 @@
 #include "kaffi/sanity_api.h"
 #include "app_config.h"
+#include "kaffi/prefs.h"
 
 #include "esp_crt_bundle.h"
 #include "esp_event.h"
@@ -42,9 +43,6 @@ ESP_EVENT_DECLARE_BASE(APP_EVENT);
 #endif
 #ifndef CONFIG_KAFFI_DIR_API_VERSION
 #define CONFIG_KAFFI_DIR_API_VERSION "2026-02-01"
-#endif
-#ifndef CONFIG_KAFFI_DIR_LOCATION
-#define CONFIG_KAFFI_DIR_LOCATION "Oslo"
 #endif
 #ifndef CONFIG_KAFFI_DIR_TOKEN
 #define CONFIG_KAFFI_DIR_TOKEN ""
@@ -553,9 +551,10 @@ void sanity_api_init() {
     ESP_LOGW(TAG, "No coffee-project token set — writes will fail");
   if (CONFIG_KAFFI_DIR_TOKEN[0] == '\0')
     ESP_LOGW(TAG, "No directory token set — people won't load");
-  ESP_LOGI(TAG, "Sanity ready (events=%s, directory=%s/%s)",
+  int office_idx = kaffi_office_get();
+  ESP_LOGI(TAG, "Sanity ready (events=%s, directory=%s, office=%s)",
            CONFIG_KAFFI_SANITY_PROJECT_ID, CONFIG_KAFFI_DIR_PROJECT_ID,
-           CONFIG_KAFFI_DIR_LOCATION);
+           KAFFI_OFFICES[office_idx < 0 ? 0 : office_idx].name);
 }
 
 bool sanity_api_fetch_people() {
@@ -577,12 +576,17 @@ bool sanity_api_fetch_people() {
   static char enc[2048];
   char url[2400];
 
+  int office_idx = kaffi_office_get();
+  const char *office = KAFFI_OFFICES[office_idx < 0 ? 0 : office_idx].name;
+
   // 1) People from the company directory (filtered to the office location).
+  // `match` instead of `==` — the directory location is free text, so word
+  // matching also catches people who typed a full address.
   snprintf(query, sizeof(query),
-           "*[_type==\"person\"&&active==true&&location==\"%s\"]"
+           "*[_type==\"person\"&&active==true&&location match \"%s\"]"
            "{_id,name,\"image\":photo.asset->url + "
            "\"?w=96&h=96&fit=crop&fm=jpg\"}",
-           CONFIG_KAFFI_DIR_LOCATION);
+           office);
   url_encode(query, enc, sizeof(enc));
   snprintf(url, sizeof(url),
            "https://%s.api.sanity.io/v%s/data/query/%s?query=%s",
@@ -609,10 +613,12 @@ bool sanity_api_fetch_people() {
   long today = local_daynum(time(nullptr));
   char cursor[KAFFI_ID_LEN] = "";
   for (int page = 0; page < EVENTS_MAX_PAGES; page++) {
+    // Events predating multi-office have no `office` — they were all Oslo.
     snprintf(query, sizeof(query),
-             "*[_type==\"coffeeEvent\"&&occurredAt>=\"%s\"&&_id>\"%s\"]"
+             "*[_type==\"coffeeEvent\"&&occurredAt>=\"%s\"&&_id>\"%s\""
+             "&&coalesce(office,\"Oslo\")==\"%s\"]"
              "|order(_id)[0...%d]{_id,personId,kind,quantity,occurredAt}",
-             ys, cursor, EVENTS_PAGE_SIZE);
+             ys, cursor, office, EVENTS_PAGE_SIZE);
     url_encode(query, enc, sizeof(enc));
     snprintf(url, sizeof(url),
              "https://%s.api.sanity.io/v%s/data/query/%s?query=%s",
@@ -656,19 +662,24 @@ bool sanity_api_log(const char *person_id, const char *person_name, int kind,
   char occ[32];
   iso_now(occ, sizeof(occ));
 
-  char body[700];
+  int office_idx = kaffi_office_get();
+  const char *office = KAFFI_OFFICES[office_idx < 0 ? 0 : office_idx].name;
+
+  char body[800];
   if (occ[0]) {
     snprintf(body, sizeof(body),
              "{\"mutations\":[{\"create\":{\"_type\":\"coffeeEvent\","
              "\"kind\":\"%s\",\"quantity\":%d,\"occurredAt\":\"%s\","
-             "\"personId\":\"%s\",\"personName\":\"%s\"}}]}",
-             kind_str, quantity, occ, person_id, person_name);
+             "\"personId\":\"%s\",\"personName\":\"%s\","
+             "\"office\":\"%s\"}}]}",
+             kind_str, quantity, occ, person_id, person_name, office);
   } else {
     snprintf(body, sizeof(body),
              "{\"mutations\":[{\"create\":{\"_type\":\"coffeeEvent\","
              "\"kind\":\"%s\",\"quantity\":%d,"
-             "\"personId\":\"%s\",\"personName\":\"%s\"}}]}",
-             kind_str, quantity, person_id, person_name);
+             "\"personId\":\"%s\",\"personName\":\"%s\","
+             "\"office\":\"%s\"}}]}",
+             kind_str, quantity, person_id, person_name, office);
   }
 
   char url[256];
@@ -686,6 +697,32 @@ bool sanity_api_log(const char *person_id, const char *person_name, int kind,
   ESP_LOGW(TAG, "Log failed HTTP %d: %s", status, respbuf);
   return false;
 }
+
+bool sanity_api_fetch_firmware(char *version, size_t vlen, char *url,
+                               size_t ulen) {
+  version[0] = '\0';
+  url[0] = '\0';
+
+  static const char *QUERY =
+      "*[_id==\"firmwareRelease\"][0]{version,\"url\":bin.asset->url}";
+  char enc[200];
+  url_encode(QUERY, enc, sizeof(enc));
+  char req_url[400];
+  snprintf(req_url, sizeof(req_url),
+           "https://%s.api.sanity.io/v%s/data/query/%s?query=%s",
+           CONFIG_KAFFI_SANITY_PROJECT_ID, CONFIG_KAFFI_SANITY_API_VERSION,
+           CONFIG_KAFFI_SANITY_DATASET, enc);
+
+  char resp[600];
+  int status = api_request(req_url, HTTP_METHOD_GET, resp, sizeof(resp),
+                           nullptr, CONFIG_KAFFI_SANITY_TOKEN);
+  if (status != 200)
+    return false;
+  return json_str(resp, "version", version, vlen) &&
+         json_str(resp, "url", url, ulen);
+}
+
+const char *sanity_api_token() { return CONFIG_KAFFI_SANITY_TOKEN; }
 
 // ─── Avatar fetch + decode (public image CDN, no auth)
 

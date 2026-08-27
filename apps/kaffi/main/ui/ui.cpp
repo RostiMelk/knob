@@ -10,6 +10,9 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+
 #include "lvgl.h"
 
 #include <cctype>
@@ -954,6 +957,90 @@ void ui_show_splash() {
   lv_label_set_text(s_status_lbl, "kaffi");
   set_mode(Mode::Status);
   display_unlock();
+}
+
+// ─── First-boot setup screens (called from app_main, before the main flow)
+
+void ui_show_wifi_setup(const char *ap_name) {
+  if (!display_lock(1000))
+    return;
+
+  lv_obj_t *view = lv_obj_create(s_screen);
+  lv_obj_remove_style_all(view);
+  lv_obj_set_size(view, 360, 360);
+  lv_obj_center(view);
+  lv_obj_set_style_bg_color(view, COL_BG, 0);
+  lv_obj_set_style_bg_opa(view, LV_OPA_COVER, 0);
+  lv_obj_clear_flag(view, LV_OBJ_FLAG_SCROLLABLE);
+
+  char qr_data[80];
+  snprintf(qr_data, sizeof(qr_data), "WIFI:T:nopass;S:%s;;", ap_name);
+  lv_obj_t *qr = lv_qrcode_create(view);
+  lv_qrcode_set_size(qr, 150);
+  lv_qrcode_set_dark_color(qr, COL_TEXT);
+  lv_qrcode_set_light_color(qr, COL_BG);
+  lv_qrcode_update(qr, qr_data, strlen(qr_data));
+  lv_obj_align(qr, LV_ALIGN_CENTER, 0, -40);
+
+  lv_obj_t *msg = make_label(view, &lv_font_montserrat_20, COL_CREAM, 80);
+  char text[96];
+  snprintf(text, sizeof(text), "Scan to join \"%s\"\nthen set up WiFi",
+           ap_name);
+  lv_label_set_text(msg, text);
+
+  display_unlock();
+}
+
+static SemaphoreHandle_t s_office_sem = nullptr;
+static int s_office_choice = -1;
+static lv_obj_t *s_office_view = nullptr;
+
+int ui_pick_office() {
+  s_office_sem = xSemaphoreCreateBinary();
+  if (!s_office_sem)
+    return 0;
+
+  if (display_lock(1000)) {
+    s_office_view = lv_obj_create(s_screen);
+    lv_obj_remove_style_all(s_office_view);
+    lv_obj_set_size(s_office_view, 360, 360);
+    lv_obj_center(s_office_view);
+    lv_obj_set_style_bg_color(s_office_view, COL_BG, 0);
+    lv_obj_set_style_bg_opa(s_office_view, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(s_office_view, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *title =
+        make_label(s_office_view, &lv_font_montserrat_28, COL_TEXT, -110);
+    lv_label_set_text(title, "Which office?");
+
+    // A few offices fit the round screen as stacked buttons; revisit the
+    // layout before this outgrows it.
+    for (int i = 0; i < KAFFI_OFFICE_COUNT; i++) {
+      lv_obj_t *btn = make_button(
+          s_office_view, KAFFI_OFFICES[i].name, COL_BREW, 264, 66, -30 + i * 80,
+          [](lv_event_t *e) {
+            auto *b = static_cast<lv_obj_t *>(lv_event_get_target(e));
+            s_office_choice = static_cast<int>(
+                reinterpret_cast<intptr_t>(lv_obj_get_user_data(b)));
+            haptic_buzz();
+            xSemaphoreGive(s_office_sem);
+          });
+      lv_obj_set_user_data(btn,
+                           reinterpret_cast<void *>(static_cast<intptr_t>(i)));
+    }
+    display_unlock();
+  }
+
+  xSemaphoreTake(s_office_sem, portMAX_DELAY);
+
+  if (display_lock(1000)) {
+    lv_obj_delete(s_office_view);
+    s_office_view = nullptr;
+    display_unlock();
+  }
+  vSemaphoreDelete(s_office_sem);
+  s_office_sem = nullptr;
+  return s_office_choice < 0 ? 0 : s_office_choice;
 }
 
 void ui_set_status(const char *msg) {

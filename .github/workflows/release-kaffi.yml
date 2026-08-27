@@ -1,0 +1,83 @@
+name: Release kaffi
+
+# Tag a release (e.g. `git tag kaffi-v0.2.0 && git push --tags`) and this
+# builds the firmware and publishes it to Sanity, where every kaffi knob
+# picks it up over the air within the hour.
+
+on:
+  push:
+    tags: ["kaffi-v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish (e.g. 0.2.0)"
+        required: true
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    container:
+      image: espressif/idf:v5.4
+    env:
+      SANITY_PROJECT: j7764jbe
+      SANITY_DATASET: production
+      SANITY_API: v2024-01-01
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#kaffi-v}"
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "$VERSION" > apps/kaffi/version.txt
+          echo "Releasing kaffi $VERSION"
+
+      - name: Inject Sanity tokens
+        shell: bash
+        run: |
+          cat > apps/kaffi/sdkconfig.defaults.local <<EOF
+          CONFIG_KAFFI_SANITY_TOKEN="${{ secrets.KAFFI_SANITY_TOKEN }}"
+          CONFIG_KAFFI_DIR_TOKEN="${{ secrets.KAFFI_DIR_TOKEN }}"
+          EOF
+
+      - name: Build
+        shell: bash
+        working-directory: apps/kaffi
+        run: |
+          . $IDF_PATH/export.sh
+          idf.py set-target esp32s3
+          idf.py build
+        env:
+          IDF_TARGET: esp32s3
+
+      - name: Publish to Sanity
+        shell: bash
+        run: |
+          BIN=apps/kaffi/build/kaffi.bin
+          echo "Uploading $(du -h $BIN | cut -f1) binary..."
+          ASSET_ID=$(curl -sf -X POST \
+            "https://$SANITY_PROJECT.api.sanity.io/$SANITY_API/assets/files/$SANITY_DATASET?filename=kaffi-$VERSION.bin" \
+            -H "Authorization: Bearer ${{ secrets.KAFFI_SANITY_TOKEN }}" \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary @$BIN \
+            | python3 -c "import json,sys; print(json.load(sys.stdin)['document']['_id'])")
+          echo "Asset: $ASSET_ID"
+
+          curl -sf -X POST \
+            "https://$SANITY_PROJECT.api.sanity.io/$SANITY_API/data/mutate/$SANITY_DATASET" \
+            -H "Authorization: Bearer ${{ secrets.KAFFI_SANITY_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"mutations\":[{\"createOrReplace\":{
+                  \"_id\":\"firmwareRelease\",
+                  \"_type\":\"firmwareRelease\",
+                  \"version\":\"$VERSION\",
+                  \"bin\":{\"_type\":\"file\",\"asset\":{\"_type\":\"reference\",\"_ref\":\"$ASSET_ID\"}}
+                }}]}"
+          echo ""
+          echo "Published kaffi $VERSION — devices update within the hour"
