@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstddef>
+
 /// Initialize the Sanity API module. Call after WiFi is connected.
 void sanity_api_init();
 
@@ -16,3 +18,12 @@ bool sanity_api_log(const char *person_id, const char *person_name, int kind,
 /// On success, *out_pixels is a PSRAM buffer the caller must free.
 bool sanity_api_fetch_avatar(const char *url, unsigned char **out_pixels,
                              int *w, int *h);
+
+/// Fetch the published firmwareRelease doc (version + binary URL) from the
+/// events project. Returns false when missing or unreachable.
+bool sanity_api_fetch_firmware(char *version, size_t vlen, char *url,
+                               size_t ulen);
+
+/// The bearer token for the events project — the OTA download needs it when
+/// the dataset is private.
+const char *sanity_api_token();

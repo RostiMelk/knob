@@ -42,10 +42,6 @@ menu "Kaffi Knob"
         string "Sanity API version (date)"
         default "2024-01-01"
 
-    config KAFFI_TIMEZONE
-        string "Timezone (POSIX TZ) for the Jan 1 year boundary"
-        default "CET-1CEST,M3.5.0,M10.5.0/3"
-
     config KAFFI_DIR_PROJECT_ID
         string "Employee directory Sanity project ID"
         default "r3dzy7he"
@@ -57,10 +53,6 @@ menu "Kaffi Knob"
     config KAFFI_DIR_API_VERSION
         string "Employee directory API version (date)"
         default "2026-02-01"
-
-    config KAFFI_DIR_LOCATION
-        string "Office location to filter people by"
-        default "Oslo"
 
     config KAFFI_DIR_TOKEN
         string "Employee directory API token (read access)"

@@ -1,6 +1,8 @@
 set(SRCS
     "main.cpp"
     "kaffi/sanity_api.cpp"
+    "kaffi/prefs.cpp"
+    "kaffi/ota.cpp"
     "ui/ui.cpp"
     "ui/images/img_flame.cpp"
 )
@@ -15,6 +17,7 @@ idf_component_register(
     REQUIRES
         knob_hal
         knob_net
+        knob_setup
         knob_storage
         knob_ui
         esp_event
@@ -22,6 +25,8 @@ idf_component_register(
         esp_wifi
         esp_netif
         esp_http_client
+        esp_https_ota
+        app_update
         esp-tls
         nvs_flash
         lwip

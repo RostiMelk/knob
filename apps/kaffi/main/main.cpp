@@ -1,4 +1,6 @@
 #include "app_config.h"
+#include "kaffi/ota.h"
+#include "kaffi/prefs.h"
 #include "kaffi/sanity_api.h"
 #include "ui/ui.h"
 
@@ -7,6 +9,7 @@
 #include "knob_events.h"
 #include "settings.h"
 #include "wifi_manager.h"
+#include "wifi_setup.h"
 
 #include "esp_event.h"
 #include "esp_heap_caps.h"
@@ -25,16 +28,18 @@
 
 static constexpr const char *TAG = "kaffi";
 
-#ifndef CONFIG_KAFFI_TIMEZONE
-#define CONFIG_KAFFI_TIMEZONE "CET-1CEST,M3.5.0,M10.5.0/3"
+#ifndef CONFIG_RADIO_WIFI_SSID
+#define CONFIG_RADIO_WIFI_SSID ""
 #endif
+
+static constexpr int KAFFI_OTA_CHECK_MS = 60 * 60 * 1000; // hourly
 
 ESP_EVENT_DEFINE_BASE(APP_EVENT);
 
 // ─── Command queue: all HTTP runs on one task with a big stack (TLS heavy)
 
 struct Cmd {
-  enum class Type { Log, Refresh } type;
+  enum class Type { Log, Refresh, OtaCheck } type;
   KaffiLogCmd log;
 };
 
@@ -69,6 +74,9 @@ static void cmd_task(void *) {
         retry.type = Cmd::Type::Refresh;
         enqueue(retry);
       }
+      break;
+    case Cmd::Type::OtaCheck:
+      kaffi_ota_check(); // spawns its own task; returns immediately
       break;
     }
   }
@@ -112,8 +120,6 @@ static void on_wifi_connected(void *, esp_event_base_t, int32_t, void *) {
     s_net_ready = true;
     esp_sntp_config_t sntp_cfg = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
     esp_netif_sntp_init(&sntp_cfg);
-    setenv("TZ", CONFIG_KAFFI_TIMEZONE, 1);
-    tzset();
     sanity_api_init();
     if (s_refresh_timer) {
       esp_timer_start_periodic(s_refresh_timer,
@@ -138,8 +144,18 @@ static void on_wifi_disconnected(void *, esp_event_base_t, int32_t, void *) {
 }
 
 static void on_people_update(void *, esp_event_base_t, int32_t, void *data) {
+  bool first = !s_have_people;
   s_have_people = true;
   ui_update_people(static_cast<KaffiState *>(data));
+
+  // A working fetch is the health check for a fresh OTA image — confirm it
+  // so the bootloader stops considering a rollback, then look for updates.
+  kaffi_ota_mark_valid();
+  if (first) {
+    Cmd cmd;
+    cmd.type = Cmd::Type::OtaCheck;
+    enqueue(cmd);
+  }
 }
 
 static void on_log(void *, esp_event_base_t, int32_t, void *data) {
@@ -173,6 +189,12 @@ static void on_avatar_ready(void *, esp_event_base_t, int32_t, void *data) {
 
 static void refresh_timer_cb(void *) {
   esp_event_post(APP_EVENT, APP_EVENT_KAFFI_REFRESH, nullptr, 0, 0);
+}
+
+static void ota_timer_cb(void *) {
+  Cmd cmd;
+  cmd.type = Cmd::Type::OtaCheck;
+  enqueue(cmd);
 }
 
 // ─── NVS
@@ -226,8 +248,34 @@ extern "C" void app_main() {
   haptic_init();
   encoder_init();
 
+  // First boot: pick the office on the knob (blocks until tapped). The
+  // office drives the directory filter, event stamping, and timezone.
+  int office = kaffi_office_get();
+  if (office < 0) {
+    office = ui_pick_office();
+    kaffi_office_set(office);
+  }
+  setenv("TZ", KAFFI_OFFICES[office].tz, 1);
+  tzset();
+
+  // No WiFi anywhere (no NVS credentials, nothing compiled in): captive
+  // portal — scan the QR with a phone, pick a network, done. This is how a
+  // CI-built generic binary gets provisioned in a new office.
+  if (!wifi_setup_has_credentials() && CONFIG_RADIO_WIFI_SSID[0] == '\0') {
+    ui_show_wifi_setup("kaffi");
+    wifi_setup_start("kaffi"); // blocks until credentials verified
+  }
+
   ui_set_status("Connecting to WiFi...");
   wifi_manager_init();
+
+  esp_timer_create_args_t ota_args = {};
+  ota_args.callback = ota_timer_cb;
+  ota_args.name = "kaffi_ota_tick";
+  esp_timer_handle_t ota_timer = nullptr;
+  esp_timer_create(&ota_args, &ota_timer);
+  esp_timer_start_periodic(ota_timer,
+                           static_cast<uint64_t>(KAFFI_OTA_CHECK_MS) * 1000);
 
   ESP_LOGI(TAG, "Init complete");
 }
