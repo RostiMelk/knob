@@ -21,6 +21,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <utility>
 
 static constexpr const char *TAG = "ui";
 
@@ -54,6 +55,7 @@ static constexpr uint8_t BACKLIGHT_DIM = 8;
 static constexpr int BACKLIGHT_FADE_STEP_MS = 30;
 static constexpr int BACKLIGHT_INACTIVITY_MS = 15000;
 static constexpr int ART_BUF_SIZE = 256 * 1024;
+static constexpr int ART_SIZE = 120; // artwork widget size (px)
 static constexpr int EXTERNAL_IDLE_TIMEOUT_MS = 300000; // 5 minutes
 
 // ─── Palette
@@ -181,6 +183,7 @@ static DiscoveryResult s_discovered;
 static int s_speaker_highlight;
 static bool s_on_picker;
 static char s_current_speaker[64];
+static bool s_grouped[DISCOVERY_MAX_SPEAKERS]; // slaved to current coordinator
 
 // ─── Station Images (compiled into firmware as C arrays)
 // ────────────────────────────────────────────────────────
@@ -390,7 +393,7 @@ static void on_vol_hide(lv_timer_t *) {
 static void on_browse_rotate_fade_done(lv_anim_t *) {
   if (s_browse_index < 0 && s_art_pixels) {
     lv_image_set_src(s_img_logo, &s_art_dsc);
-    lv_image_set_inner_align(s_img_logo, LV_IMAGE_ALIGN_STRETCH);
+    lv_image_set_inner_align(s_img_logo, LV_IMAGE_ALIGN_CENTER);
   } else if (s_browse_index >= 0) {
     set_logo(s_browse_index);
   }
@@ -647,7 +650,7 @@ static void enter_browse() {
 static void on_exit_browse_fade_done(lv_anim_t *a) {
   if (s_external_playing && s_art_pixels) {
     lv_image_set_src(s_img_logo, &s_art_dsc);
-    lv_image_set_inner_align(s_img_logo, LV_IMAGE_ALIGN_STRETCH);
+    lv_image_set_inner_align(s_img_logo, LV_IMAGE_ALIGN_CENTER);
   } else {
     set_logo(s_station_index);
   }
@@ -1163,8 +1166,10 @@ static void anim_spinner_cb(void *obj, int32_t v) {
   lv_arc_set_rotation(static_cast<lv_obj_t *>(obj), static_cast<int16_t>(v));
 }
 
-// Guard to prevent concurrent background speaker tasks
+// Guards to prevent concurrent background speaker tasks — switch and group
+// toggle both mutate the shared group state, so each checks both.
 static volatile bool s_speaker_task_running = false;
+static volatile bool s_group_task_running = false;
 
 // Args for the background speaker-switch task (static — only one switch at a
 // time)
@@ -1172,12 +1177,21 @@ static struct {
   char new_ip[40];
   char new_name[64];
   int new_port;
+  char old_ip[40];
+  int old_port;
   bool was_playing;
 } s_switch_args;
 
 static void speaker_switch_task(void *) {
   // All blocking HTTP calls run here, OFF the LVGL task
   sonos_stop();
+  // Dissolve any group and silence the old coordinator BEFORE repointing.
+  // Skipping this leaves the old speaker streaming its own copy of the
+  // station — an unsynced duplicate that drifts into echo.
+  sonos_clear_group();
+  if (s_switch_args.was_playing && s_switch_args.old_ip[0] &&
+      strcmp(s_switch_args.old_ip, s_switch_args.new_ip) != 0)
+    sonos_stop_playback_at(s_switch_args.old_ip, s_switch_args.old_port);
   sonos_set_speaker(s_switch_args.new_ip, s_switch_args.new_port);
   settings_set_speaker_name(s_switch_args.new_name);
   sonos_start();
@@ -1190,7 +1204,8 @@ static void speaker_switch_task(void *) {
 static void select_speaker(int index) {
   if (index < 0 || index >= s_discovered.count)
     return;
-  if (s_speaker_task_running)
+  // Both tasks mutate the shared group state — never run them concurrently.
+  if (s_speaker_task_running || s_group_task_running)
     return;
   auto &speaker = s_discovered.speakers[index];
 
@@ -1201,8 +1216,11 @@ static void select_speaker(int index) {
           sizeof(s_switch_args.new_name) - 1);
   s_switch_args.new_name[sizeof(s_switch_args.new_name) - 1] = '\0';
   s_switch_args.new_port = speaker.port;
+  sonos_get_speaker(s_switch_args.old_ip, sizeof(s_switch_args.old_ip),
+                    &s_switch_args.old_port);
   s_switch_args.was_playing = (s_play_state == PlayState::Playing ||
                                s_play_state == PlayState::Transitioning);
+  memset(s_grouped, 0, sizeof(s_grouped)); // switch dissolves the group
 
   // UI updates (instant, on LVGL task)
   strncpy(s_current_speaker, speaker.name, sizeof(s_current_speaker) - 1);
@@ -1213,8 +1231,87 @@ static void select_speaker(int index) {
 
   // Blocking work on a background task
   s_speaker_task_running = true;
-  xTaskCreatePinnedToCore(speaker_switch_task, "spk_sw", 10240, nullptr,
-                          NET_TASK_PRIO, nullptr, NET_TASK_CORE);
+  if (xTaskCreatePinnedToCore(speaker_switch_task, "spk_sw", 10240, nullptr,
+                              NET_TASK_PRIO, nullptr, NET_TASK_CORE) != pdPASS)
+    s_speaker_task_running = false;
+}
+
+// ─── Multi-room grouping — long-press a speaker to slave it to the current
+// coordinator (x-rincon join → Sonos keeps them sample-synced). Tap still
+// switches, which dissolves the group.
+
+static struct {
+  char ip[40];
+  int port;
+  char coordinator_uuid[64];
+  bool join;
+} s_group_args;
+
+static void group_toggle_task(void *) {
+  if (s_group_args.join)
+    sonos_group_speaker(s_group_args.ip, s_group_args.port,
+                        s_group_args.coordinator_uuid);
+  else
+    sonos_ungroup_speaker(s_group_args.ip, s_group_args.port);
+  s_group_task_running = false;
+  vTaskDelete(nullptr);
+}
+
+// The discovery entry for the speaker the knob is currently pointed at.
+static const SonosSpeaker *current_coordinator() {
+  if (!s_current_speaker[0])
+    return nullptr;
+  return discovery_find_by_name(&s_discovered, s_current_speaker);
+}
+
+// Green ring = playing as part of the current group.
+static void style_group_ring(lv_obj_t *card, bool grouped) {
+  lv_obj_set_style_outline_width(card, grouped ? 2 : 0, LV_PART_MAIN);
+  lv_obj_set_style_outline_color(card, COL_GREEN, LV_PART_MAIN);
+  lv_obj_set_style_outline_pad(card, 1, LV_PART_MAIN);
+}
+
+static void toggle_speaker_group(int index) {
+  if (index < 0 || index >= s_discovered.count)
+    return;
+  if (s_group_task_running || s_speaker_task_running)
+    return;
+  const SonosSpeaker *coord = current_coordinator();
+  if (!coord)
+    return; // current speaker unknown to this scan — nothing to group with
+  auto &spk = s_discovered.speakers[index];
+  if (strcmp(spk.uuid, coord->uuid) == 0)
+    return; // the coordinator can't slave to itself
+
+  bool join = !s_grouped[index];
+  strncpy(s_group_args.ip, spk.ip, sizeof(s_group_args.ip) - 1);
+  s_group_args.ip[sizeof(s_group_args.ip) - 1] = '\0';
+  s_group_args.port = spk.port;
+  strncpy(s_group_args.coordinator_uuid, coord->uuid,
+          sizeof(s_group_args.coordinator_uuid) - 1);
+  s_group_args.coordinator_uuid[sizeof(s_group_args.coordinator_uuid) - 1] =
+      '\0';
+  s_group_args.join = join;
+
+  // Instant feedback on the LVGL task; SOAP happens in the background
+  s_grouped[index] = join;
+  if (s_picker_list &&
+      std::cmp_less(index, lv_obj_get_child_count(s_picker_list)))
+    style_group_ring(lv_obj_get_child(s_picker_list, index), join);
+  haptic_buzz();
+  ESP_LOGI(TAG, "%s %s %s group", join ? "Adding" : "Removing", spk.name,
+           join ? "to" : "from");
+
+  s_group_task_running = true;
+  if (xTaskCreatePinnedToCore(group_toggle_task, "spk_grp", 8192, nullptr,
+                              NET_TASK_PRIO, nullptr, NET_TASK_CORE) != pdPASS)
+    s_group_task_running = false;
+}
+
+static void on_speaker_long_press(lv_event_t *e) {
+  auto index =
+      static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
+  toggle_speaker_group(index);
 }
 
 static void on_speaker_tap(lv_event_t *e) {
@@ -1223,22 +1320,32 @@ static void on_speaker_tap(lv_event_t *e) {
   select_speaker(index);
 }
 
+static int s_picker_prev_highlight = -1;
+
+static void style_picker_item(lv_obj_t *child, bool active) {
+  lv_obj_set_style_border_color(
+      child, active ? COL_ACCENT : lv_color_hex(0x2C2C2E), LV_PART_MAIN);
+  lv_obj_set_style_border_width(child, active ? 2 : 1, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(
+      child, active ? lv_color_hex(0x1A1A2E) : lv_color_hex(0x1C1C1E),
+      LV_PART_MAIN);
+}
+
+// Restyle only the two rows a detent touches, not the whole list.
 static void highlight_picker_item(int highlight) {
   if (!s_picker_list)
     return;
   int count = lv_obj_get_child_count(s_picker_list);
-  for (int i = 0; i < count; i++) {
-    lv_obj_t *child = lv_obj_get_child(s_picker_list, i);
-    bool active = (i == highlight);
-    lv_obj_set_style_border_color(
-        child, active ? COL_ACCENT : lv_color_hex(0x2C2C2E), LV_PART_MAIN);
-    lv_obj_set_style_border_width(child, active ? 2 : 1, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(
-        child, active ? lv_color_hex(0x1A1A2E) : lv_color_hex(0x1C1C1E),
-        LV_PART_MAIN);
-    if (active)
-      lv_obj_scroll_to_view(child, LV_ANIM_ON);
+  if (s_picker_prev_highlight >= 0 && s_picker_prev_highlight < count &&
+      s_picker_prev_highlight != highlight)
+    style_picker_item(lv_obj_get_child(s_picker_list, s_picker_prev_highlight),
+                      false);
+  if (highlight >= 0 && highlight < count) {
+    lv_obj_t *child = lv_obj_get_child(s_picker_list, highlight);
+    style_picker_item(child, true);
+    lv_obj_scroll_to_view(child, LV_ANIM_ON);
   }
+  s_picker_prev_highlight = highlight;
 }
 
 static lv_point_t s_picker_press_point;
@@ -1353,6 +1460,19 @@ static void rebuild_speaker_list() {
   lv_label_set_text(title, "Speakers");
   lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 54);
 
+  // Seed group state from live topology: speakers already slaved to our
+  // coordinator (grouped via the Sonos app or a previous session) show the
+  // ring, and get tracked so the volume knob reaches them too.
+  const SonosSpeaker *coord = current_coordinator();
+  for (int i = 0; i < s_discovered.count; i++) {
+    auto &spk = s_discovered.speakers[i];
+    s_grouped[i] = coord && spk.grouped &&
+                   strcmp(spk.coordinator_uuid, coord->uuid) == 0 &&
+                   strcmp(spk.uuid, coord->uuid) != 0;
+    if (s_grouped[i])
+      sonos_add_group_member(spk.ip, spk.port);
+  }
+
   if (s_discovered.count > 0) {
     s_picker_list = lv_obj_create(s_scr_picker);
     lv_obj_set_size(s_picker_list, 260, 170);
@@ -1360,6 +1480,8 @@ static void rebuild_speaker_list() {
     lv_obj_set_style_bg_opa(s_picker_list, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_border_width(s_picker_list, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_all(s_picker_list, 0, LV_PART_MAIN);
+    // Group rings draw outside the cards — pad so the edge rows don't clip
+    lv_obj_set_style_pad_ver(s_picker_list, 4, LV_PART_MAIN);
     lv_obj_set_style_pad_row(s_picker_list, 8, LV_PART_MAIN);
     lv_obj_set_flex_flow(s_picker_list, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(s_picker_list, LV_FLEX_ALIGN_START,
@@ -1384,6 +1506,7 @@ static void rebuild_speaker_list() {
       lv_obj_set_style_bg_color(
           card, lv_color_hex(0x0A3A6B),
           static_cast<lv_style_selector_t>(LV_PART_MAIN | LV_STATE_PRESSED));
+      style_group_ring(card, s_grouped[i]);
 
       if (has_dot) {
         lv_obj_t *dot = lv_obj_create(card);
@@ -1400,12 +1523,19 @@ static void rebuild_speaker_list() {
       lv_obj_set_style_text_color(lbl, COL_TEXT, LV_PART_MAIN);
       lv_obj_set_style_text_font(lbl, &geist_regular_18, LV_PART_MAIN);
       lv_label_set_text(lbl, spk.name);
+      // Fixed size + DOT: long names must ellipsize on one line, or the
+      // label wraps and bursts out of the 50px card.
+      lv_label_set_long_mode(lbl, LV_LABEL_LONG_DOT);
+      lv_obj_set_size(lbl, has_dot ? 198 : 208, 22);
       lv_obj_align(lbl, LV_ALIGN_LEFT_MID, has_dot ? 26 : 16, 0);
 
       lv_obj_add_event_cb(card, on_speaker_tap, LV_EVENT_SHORT_CLICKED,
                           reinterpret_cast<void *>(static_cast<intptr_t>(i)));
+      lv_obj_add_event_cb(card, on_speaker_long_press, LV_EVENT_LONG_PRESSED,
+                          reinterpret_cast<void *>(static_cast<intptr_t>(i)));
     }
 
+    s_picker_prev_highlight = -1; // fresh list — stale index would misstyle
     highlight_picker_item(0);
   } else {
     s_picker_list = nullptr;
@@ -1672,6 +1802,19 @@ void ui_set_media_info(const MediaInfo *info) {
         uint8_t *px = nullptr;
         int aw = 0, ah = 0;
         bool decoded = art_decode_jpeg(s_art_jpeg, len, &px, &aw, &ah, 300);
+        // Pre-scale to the exact widget size: a stretched lv_image goes
+        // through LVGL's per-pixel CPU transform on every frame, while this
+        // one-time box-average costs a few ms per track. (TJPGD only scales
+        // by powers of two, hence decode large then resample.)
+        if (decoded && px && (aw != ART_SIZE || ah != ART_SIZE)) {
+          uint8_t *scaled = art_scale_rgb565(px, aw, ah, ART_SIZE, ART_SIZE);
+          if (scaled) {
+            heap_caps_free(px);
+            px = scaled;
+            aw = ART_SIZE;
+            ah = ART_SIZE;
+          }
+        }
         if (decoded && px) {
           if (display_lock(200)) {
             art_free_pixels();
@@ -1686,7 +1829,7 @@ void ui_set_media_info(const MediaInfo *info) {
             art_ready = true;
 
             lv_image_set_src(s_img_logo, &s_art_dsc);
-            lv_image_set_inner_align(s_img_logo, LV_IMAGE_ALIGN_STRETCH);
+            lv_image_set_inner_align(s_img_logo, LV_IMAGE_ALIGN_CENTER);
 
             // Stop pulse, hide placeholder, fade in art
             lv_anim_delete(s_art_loading, anim_bg_opa_cb);
@@ -1756,7 +1899,7 @@ void ui_set_media_info(const MediaInfo *info) {
       // Show album art if we decoded it, otherwise hide the logo
       if (s_art_pixels && (art_ready || !was_external)) {
         lv_image_set_src(s_img_logo, &s_art_dsc);
-        lv_image_set_inner_align(s_img_logo, LV_IMAGE_ALIGN_STRETCH);
+        lv_image_set_inner_align(s_img_logo, LV_IMAGE_ALIGN_CENTER);
         lv_obj_remove_flag(s_logo_container, LV_OBJ_FLAG_HIDDEN);
         lv_anim_delete(s_logo_container, anim_opa_cb);
         if (!was_external) {

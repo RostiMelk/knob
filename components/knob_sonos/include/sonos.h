@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 void sonos_init();
@@ -7,6 +8,9 @@ void sonos_start();
 void sonos_stop();
 
 void sonos_set_speaker(const char *ip, int port = 1400);
+
+// Copy the currently targeted speaker's ip/port (the group coordinator).
+void sonos_get_speaker(char *ip, size_t ip_len, int *port);
 
 // Register station URLs for URI-to-index matching during state polling
 void sonos_set_stations(const char *const *urls, int count);

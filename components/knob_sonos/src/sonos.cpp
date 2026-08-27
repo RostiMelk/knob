@@ -133,6 +133,19 @@ struct GroupMember {
 static constexpr int MAX_GROUP_MEMBERS = 8;
 static GroupMember s_group[MAX_GROUP_MEMBERS];
 static int s_group_count = 0;
+// The group is touched from three tasks (UI grouping, speaker switch, net
+// volume fan-out) — snapshot/mutate under this lock, fire SOAP outside it.
+static portMUX_TYPE s_group_mux = portMUX_INITIALIZER_UNLOCKED;
+
+static int snapshot_group(GroupMember *out, bool clear) {
+  taskENTER_CRITICAL(&s_group_mux);
+  int n = s_group_count;
+  memcpy(out, s_group, sizeof(GroupMember) * static_cast<size_t>(n));
+  if (clear)
+    s_group_count = 0;
+  taskEXIT_CRITICAL(&s_group_mux);
+  return n;
+}
 
 // ─── Registered Station URLs (set by app via sonos_set_stations) ────────────
 
@@ -487,8 +500,10 @@ static void exec_set_volume(int level) {
   soap_fire(RENDERING_CONTROL_PATH, "SetVolume", RENDERING_CONTROL_NS, inner);
 
   // Also set volume on all group members
-  for (int i = 0; i < s_group_count; i++) {
-    soap_fire_at(s_group[i].ip, s_group[i].port, RENDERING_CONTROL_PATH,
+  GroupMember members[MAX_GROUP_MEMBERS];
+  int n = snapshot_group(members, false);
+  for (int i = 0; i < n; i++) {
+    soap_fire_at(members[i].ip, members[i].port, RENDERING_CONTROL_PATH,
                  "SetVolume", RENDERING_CONTROL_NS, inner);
   }
 }
@@ -637,6 +652,15 @@ void sonos_set_speaker(const char *ip, int port) {
   ESP_LOGI(TAG, "Speaker changed: %s:%d", s_speaker_ip, s_speaker_port);
 }
 
+void sonos_get_speaker(char *ip, size_t ip_len, int *port) {
+  if (ip && ip_len) {
+    strncpy(ip, s_speaker_ip, ip_len - 1);
+    ip[ip_len - 1] = '\0';
+  }
+  if (port)
+    *port = s_speaker_port;
+}
+
 void sonos_start() {
   if (s_task)
     return;
@@ -717,13 +741,17 @@ void sonos_group_speaker(const char *target_ip, int target_port,
                AV_TRANSPORT_NS, body);
 
   // Track as group member
-  if (s_group_count < MAX_GROUP_MEMBERS) {
+  taskENTER_CRITICAL(&s_group_mux);
+  int count = s_group_count;
+  if (count < MAX_GROUP_MEMBERS) {
     auto &m = s_group[s_group_count++];
     strncpy(m.ip, target_ip, sizeof(m.ip) - 1);
     m.ip[sizeof(m.ip) - 1] = '\0';
     m.port = target_port;
-    ESP_LOGI(TAG, "Group now has %d member(s)", s_group_count);
+    count = s_group_count;
   }
+  taskEXIT_CRITICAL(&s_group_mux);
+  ESP_LOGI(TAG, "Group now has %d member(s)", count);
 }
 
 void sonos_clear_group() {
@@ -733,13 +761,14 @@ void sonos_clear_group() {
       "<InstanceID>0</InstanceID>"
       "</u:BecomeCoordinatorOfStandaloneGroup>";
 
-  for (int i = 0; i < s_group_count; i++) {
-    ESP_LOGI(TAG, "Ungrouping %s:%d", s_group[i].ip, s_group[i].port);
-    soap_fire_at(s_group[i].ip, s_group[i].port, AV_TRANSPORT_PATH,
+  GroupMember members[MAX_GROUP_MEMBERS];
+  int n = snapshot_group(members, true);
+  for (int i = 0; i < n; i++) {
+    ESP_LOGI(TAG, "Ungrouping %s:%d", members[i].ip, members[i].port);
+    soap_fire_at(members[i].ip, members[i].port, AV_TRANSPORT_PATH,
                  "BecomeCoordinatorOfStandaloneGroup", AV_TRANSPORT_NS,
                  STANDALONE_BODY);
   }
-  s_group_count = 0;
 }
 
 void sonos_ungroup_speaker(const char *ip, int port) {
@@ -755,6 +784,7 @@ void sonos_ungroup_speaker(const char *ip, int port) {
                STANDALONE_BODY);
 
   // Remove from tracked group members
+  taskENTER_CRITICAL(&s_group_mux);
   for (int i = 0; i < s_group_count; i++) {
     if (strcmp(s_group[i].ip, ip) == 0 && s_group[i].port == port) {
       s_group[i] = s_group[s_group_count - 1];
@@ -762,25 +792,39 @@ void sonos_ungroup_speaker(const char *ip, int port) {
       break;
     }
   }
+  taskEXIT_CRITICAL(&s_group_mux);
 }
 
 void sonos_add_group_member(const char *ip, int port) {
-  // Avoid duplicates
+  taskENTER_CRITICAL(&s_group_mux);
+  bool added = false;
+  int count = s_group_count;
+  bool dup = false;
   for (int i = 0; i < s_group_count; i++) {
-    if (strcmp(s_group[i].ip, ip) == 0 && s_group[i].port == port)
-      return;
+    if (strcmp(s_group[i].ip, ip) == 0 && s_group[i].port == port) {
+      dup = true;
+      break;
+    }
   }
-  if (s_group_count < MAX_GROUP_MEMBERS) {
+  if (!dup && s_group_count < MAX_GROUP_MEMBERS) {
     auto &m = s_group[s_group_count++];
     strncpy(m.ip, ip, sizeof(m.ip) - 1);
     m.ip[sizeof(m.ip) - 1] = '\0';
     m.port = port;
-    ESP_LOGI(TAG, "Tracked group member %s:%d (%d total)", ip, port,
-             s_group_count);
+    count = s_group_count;
+    added = true;
   }
+  taskEXIT_CRITICAL(&s_group_mux);
+  if (added)
+    ESP_LOGI(TAG, "Tracked group member %s:%d (%d total)", ip, port, count);
 }
 
-int sonos_group_count() { return s_group_count; }
+int sonos_group_count() {
+  taskENTER_CRITICAL(&s_group_mux);
+  int n = s_group_count;
+  taskEXIT_CRITICAL(&s_group_mux);
+  return n;
+}
 
 int sonos_fetch_art(const char *url, uint8_t *buf, int buf_size) {
   if (!url || !url[0] || !buf || buf_size <= 0)
