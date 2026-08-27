@@ -7,6 +7,8 @@ import {
   Flex,
   Spinner,
   Stack,
+  Tab,
+  TabList,
   Text,
 } from "@sanity/ui";
 import { useEffect, useMemo, useState } from "react";
@@ -30,7 +32,15 @@ type EventRow = {
   personName?: string;
   kind: "brew" | "cup";
   quantity: number;
+  office?: string;
 };
+
+// Events written before multi-office support carry no office stamp.
+const DEFAULT_OFFICE = "Oslo";
+
+function officeOf(ev: EventRow) {
+  return ev.office || DEFAULT_OFFICE;
+}
 
 type Standing = {
   personId: string;
@@ -78,18 +88,31 @@ export function LeaderboardTool() {
   const client = useClient({ apiVersion: API_VERSION });
   const [events, setEvents] = useState<EventRow[] | null>(null);
   const [error, setError] = useState(false);
+  const [office, setOffice] = useState<string | null>(null);
 
   useEffect(() => {
     client
       .fetch<EventRow[]>(
-        '*[_type == "coffeeEvent" && occurredAt >= $ys]{personId, personName, kind, quantity}',
+        '*[_type == "coffeeEvent" && occurredAt >= $ys]{personId, personName, kind, quantity, office}',
         { ys: yearStartIso() },
       )
       .then(setEvents)
       .catch(() => setError(true));
   }, [client]);
 
-  const standings = useMemo(() => (events ? aggregate(events) : []), [events]);
+  const offices = useMemo(
+    () => [...new Set((events ?? []).map(officeOf))].sort(),
+    [events],
+  );
+  const selectedOffice = office ?? offices[0];
+
+  const standings = useMemo(
+    () =>
+      events
+        ? aggregate(events.filter((ev) => officeOf(ev) === selectedOffice))
+        : [],
+    [events, selectedOffice],
+  );
   const { people } = useDirectoryPeople(standings.map((s) => s.personId));
 
   if (error)
@@ -122,13 +145,28 @@ export function LeaderboardTool() {
           </Text>
         </Stack>
 
+        {offices.length > 1 && (
+          <TabList space={1}>
+            {offices.map((o) => (
+              <Tab
+                key={o}
+                id={`office-${o}`}
+                aria-controls="office-standings"
+                label={o}
+                selected={o === selectedOffice}
+                onClick={() => setOffice(o)}
+              />
+            ))}
+          </TabList>
+        )}
+
         {standings.length === 0 && (
           <Card padding={4} radius={3} border>
             <Text muted>Nothing brewed yet — be the first hero.</Text>
           </Card>
         )}
 
-        <Stack space={2}>
+        <Stack space={2} id="office-standings">
           {standings.map((s, rank) => {
             const person = people.get(s.personId);
             const worst = rank === standings.length - 1 && s.balance < 0;
