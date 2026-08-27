@@ -17,3 +17,13 @@
 // Returns true on success. On failure, *out_buf is nullptr.
 bool art_decode_jpeg(const uint8_t *jpeg_data, int jpeg_len, uint8_t **out_buf,
                      int *out_w, int *out_h, int max_dim = 120);
+
+// Box-average resample of a swapped-RGB565 image into a new PSRAM buffer of
+// exactly dst_w × dst_h. Scaled lv_image transforms run through LVGL's slow
+// per-pixel CPU path on every frame, so pre-scale once to the widget size and
+// render untransformed instead.
+//
+// Returns a heap_caps_malloc'd buffer the caller must free, or nullptr on
+// allocation failure.
+uint8_t *art_scale_rgb565(const uint8_t *src, int src_w, int src_h, int dst_w,
+                          int dst_h);

@@ -13,40 +13,7 @@ extern "C" {
 static constexpr const char *TAG = "art_dec";
 static constexpr int TJPGD_WORK_SIZE = 32768;
 
-struct MemStream {
-  const uint8_t *data;
-  int len;
-  int pos;
-};
-
-struct DecodeCtx {
-  uint16_t *out;
-  int stride; // pixels per row in output buffer
-};
-
-static size_t mem_input(JDEC *jd, uint8_t *buf, size_t ndata) {
-  auto *ms = static_cast<MemStream *>(jd->device);
-  int avail = ms->len - ms->pos;
-  if (static_cast<int>(ndata) > avail)
-    ndata = avail;
-  if (buf)
-    memcpy(buf, ms->data + ms->pos, ndata);
-  ms->pos += ndata;
-  return ndata;
-}
-
-static int rgb565_output(JDEC *jd, void *bitmap, JRECT *rect) {
-  auto *ctx = static_cast<DecodeCtx *>(jd->device);
-  // TJPGD stashes our device pointer in jd->device during prepare,
-  // but during decomp the device pointer we passed is the MemStream.
-  // We need a different approach — store DecodeCtx via a static.
-  (void)jd;
-  (void)ctx;
-  // This callback is not used in our design — see below.
-  return 1;
-}
-
-// We use a combined device struct that has both stream and output info.
+// Combined TJPGD device struct with both stream and output info.
 struct JpegDevice {
   // Stream input
   const uint8_t *data;
@@ -182,4 +149,45 @@ bool art_decode_jpeg(const uint8_t *jpeg_data, int jpeg_len, uint8_t **out_buf,
   ESP_LOGI(TAG, "Decoded %dx%d JPEG → %dx%d RGB565 (%u bytes)", jd.width,
            jd.height, sw, sh, (unsigned)buf_size);
   return true;
+}
+
+uint8_t *art_scale_rgb565(const uint8_t *src, int src_w, int src_h, int dst_w,
+                          int dst_h) {
+  if (!src || src_w <= 0 || src_h <= 0 || dst_w <= 0 || dst_h <= 0)
+    return nullptr;
+  auto *dst = static_cast<uint8_t *>(heap_caps_malloc(
+      static_cast<size_t>(dst_w) * dst_h * 2, MALLOC_CAP_SPIRAM));
+  if (!dst)
+    return nullptr;
+
+  for (int y = 0; y < dst_h; y++) {
+    int sy0 = y * src_h / dst_h;
+    int sy1 = (y + 1) * src_h / dst_h;
+    if (sy1 <= sy0) // upscaling: sample at least one source row
+      sy1 = sy0 + 1;
+    for (int x = 0; x < dst_w; x++) {
+      int sx0 = x * src_w / dst_w;
+      int sx1 = (x + 1) * src_w / dst_w;
+      if (sx1 <= sx0)
+        sx1 = sx0 + 1;
+      int r = 0, g = 0, b = 0, n = 0;
+      for (int sy = sy0; sy < sy1; sy++) {
+        for (int sx = sx0; sx < sx1; sx++) {
+          const uint8_t *p =
+              src + (static_cast<ptrdiff_t>(sy) * src_w + sx) * 2;
+          auto v = static_cast<uint16_t>((p[0] << 8) | p[1]); // swapped
+          r += (v >> 11) & 0x1F;
+          g += (v >> 5) & 0x3F;
+          b += v & 0x1F;
+          n++;
+        }
+      }
+      auto v =
+          static_cast<uint16_t>(((r / n) << 11) | ((g / n) << 5) | (b / n));
+      uint8_t *q = dst + (static_cast<ptrdiff_t>(y) * dst_w + x) * 2;
+      q[0] = static_cast<uint8_t>(v >> 8);
+      q[1] = static_cast<uint8_t>(v & 0xFF);
+    }
+  }
+  return dst;
 }
