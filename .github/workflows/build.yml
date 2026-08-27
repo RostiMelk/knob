@@ -13,7 +13,7 @@ jobs:
       image: espressif/idf:v5.4
     strategy:
       matrix:
-        app: [radio]
+        app: [radio, kaffi]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
