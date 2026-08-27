@@ -1,0 +1,79 @@
+menu "Kaffi Knob"
+
+    # NOTE: CONFIG_RADIO_* prefix is required — shared components (knob_net,
+    # knob_storage) reference these symbols by name. Same as the Spotify app.
+
+    config RADIO_WIFI_SSID
+        string "WiFi SSID"
+        default ""
+
+    config RADIO_WIFI_PASSWORD
+        string "WiFi Password"
+        default ""
+
+    config RADIO_WIFI_MAX_RETRIES
+        int "WiFi Max Retries"
+        default 5
+        range 1 20
+
+    # Required by shared knob_storage component (unused by Kaffi)
+    config RADIO_VOLUME_DEFAULT
+        int "Default volume (unused — required by shared components)"
+        default 50
+        range 0 100
+
+    config RADIO_SONOS_SPEAKER_IP
+        string "Sonos speaker IP (unused — required by shared components)"
+        default ""
+
+    config RADIO_SONOS_POLL_INTERVAL_MS
+        int "Sonos poll interval (unused — required by shared components)"
+        default 2000
+
+    config KAFFI_SANITY_PROJECT_ID
+        string "Sanity project ID"
+        default "j7764jbe"
+
+    config KAFFI_SANITY_DATASET
+        string "Sanity dataset"
+        default "production"
+
+    config KAFFI_SANITY_API_VERSION
+        string "Sanity API version (date)"
+        default "2024-01-01"
+
+    config KAFFI_TIMEZONE
+        string "Timezone (POSIX TZ) for the Jan 1 year boundary"
+        default "CET-1CEST,M3.5.0,M10.5.0/3"
+
+    config KAFFI_DIR_PROJECT_ID
+        string "Employee directory Sanity project ID"
+        default "r3dzy7he"
+
+    config KAFFI_DIR_DATASET
+        string "Employee directory dataset"
+        default "production"
+
+    config KAFFI_DIR_API_VERSION
+        string "Employee directory API version (date)"
+        default "2026-02-01"
+
+    config KAFFI_DIR_LOCATION
+        string "Office location to filter people by"
+        default "Oslo"
+
+    config KAFFI_DIR_TOKEN
+        string "Employee directory API token (read access)"
+        default ""
+        help
+            A read token for the company directory project. Set this in
+            sdkconfig.defaults.local, never commit it.
+
+    config KAFFI_SANITY_TOKEN
+        string "Sanity API token (write access)"
+        default ""
+        help
+            A token with write access to the dataset. Create one in
+            sanity.io/manage. Set this in sdkconfig.defaults.local, never commit it.
+
+endmenu

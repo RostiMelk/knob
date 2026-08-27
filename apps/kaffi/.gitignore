@@ -1,0 +1,17 @@
+# Studio (node)
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+*.log
+.sanity/
+
+# Firmware (ESP-IDF)
+build/
+managed_components/
+.cache/
+sdkconfig
+sdkconfig.old
+sdkconfig.defaults.local
+serial.log

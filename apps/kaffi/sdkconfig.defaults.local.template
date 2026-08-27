@@ -1,0 +1,16 @@
+# Copy to sdkconfig.defaults.local and fill in. This file is gitignored.
+
+CONFIG_RADIO_WIFI_SSID="your-wifi"
+CONFIG_RADIO_WIFI_PASSWORD="your-password"
+
+CONFIG_KAFFI_SANITY_PROJECT_ID="j7764jbe"
+CONFIG_KAFFI_SANITY_DATASET="production"
+CONFIG_KAFFI_SANITY_API_VERSION="2024-01-01"
+CONFIG_KAFFI_SANITY_TOKEN="sk..."
+
+# Company employee directory (read-only) — people are pulled live from here
+CONFIG_KAFFI_DIR_PROJECT_ID="r3dzy7he"
+CONFIG_KAFFI_DIR_DATASET="production"
+CONFIG_KAFFI_DIR_API_VERSION="2026-02-01"
+CONFIG_KAFFI_DIR_LOCATION="Oslo"
+CONFIG_KAFFI_DIR_TOKEN="sk..."
