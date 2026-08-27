@@ -23,6 +23,16 @@ fetch — no stored counters.
 
 Events for the current year are cursor-paginated and aggregated on-device.
 
+## Multi-office
+
+One binary serves every office. On first boot the knob asks which office it lives in
+(stored in NVS); that choice drives the directory location filter (GROQ `match`, so
+free-text locations like full addresses still match), the `office` stamp on every event,
+and the timezone for streaks. Each office gets its own balances, streaks, and
+leaderboard. Offices are defined in `main/app_config.h` (`KAFFI_OFFICES`) — adding one
+is a table row + a release. Events without an `office` predate multi-office and count as
+Oslo.
+
 ## Scoring
 
 ```
@@ -56,20 +66,46 @@ refetch lands. Avatars are fetched once, decoded JPEG → RGB565, and cached in 
 WiFi blips don't take over the screen once people are loaded — the knob keeps working
 from memory and refetches quietly on reconnect.
 
-## Setup & flash
+## Setting up a new knob
+
+Flash any kaffi binary (USB once, OTA thereafter). On first boot the knob:
+
+1. Asks which office it's in (tap on screen)
+2. Shows a QR code — scan it with a phone to join the `kaffi` hotspot, a captive
+   portal opens, pick the office WiFi and enter its password
+
+That's it. Credentials live in NVS, so a generic CI-built binary works anywhere —
+flash it in Oslo, mail it to SF.
+
+### Dev builds
 
 ```bash
 cp apps/kaffi/sdkconfig.defaults.local.template apps/kaffi/sdkconfig.defaults.local
-# fill in WiFi + both Sanity tokens
+# fill in both Sanity tokens (and optionally WiFi to skip the portal)
 
 ./test.sh kaffi          # build + lint (needs ESP-IDF sourced)
 ./flash.sh kaffi -m      # build, flash, monitor
 ```
 
-Config lives in `sdkconfig.defaults.local` (gitignored): `CONFIG_RADIO_WIFI_*` (the
-prefix is required by shared components) and `CONFIG_KAFFI_*` — see
-`main/Kconfig.projbuild` for the full list. Tokens are compiled into firmware; on-device
-exposure is accepted for this internal device.
+Tokens are compiled into firmware; on-device exposure is accepted for this internal
+device.
+
+## OTA releases
+
+Tag a release and CI does the rest:
+
+```bash
+git tag kaffi-v0.2.0 && git push --tags
+```
+
+The `release-kaffi` workflow builds the firmware (version from the tag), uploads
+`kaffi.bin` as a Sanity asset, and publishes a `firmwareRelease` document. Every knob
+polls it hourly (and after each boot), updates when the published version is newer, and
+reboots into the new image. A fresh image must complete a successful people fetch to
+mark itself valid — otherwise the bootloader rolls back to the previous partition, so a
+bad release can't brick a device an ocean away.
+
+Requires `KAFFI_SANITY_TOKEN` and `KAFFI_DIR_TOKEN` as GitHub Actions secrets.
 
 ## Studio
 
@@ -95,11 +131,14 @@ origin on the directory project.
 
 ```
 apps/kaffi/
+  version.txt                firmware version (CI overwrites from the release tag)
   main/
     main.cpp                 boot, event loop, WiFi wiring, cmd/avatar tasks
-    app_config.h             event IDs, Person/KaffiState, scoring constants
+    app_config.h             event IDs, offices, Person/KaffiState, scoring constants
     kaffi/sanity_api.*       HTTPS to both projects, JSON parse, aggregation, streaks
-    ui/ui.*                  LVGL state machine (list/action/pots/leaderboard/toast)
+    kaffi/prefs.*            NVS-backed office choice
+    kaffi/ota.*              firmwareRelease poll + esp_https_ota + rollback guard
+    ui/ui.*                  LVGL state machine (setup/list/action/pots/leaderboard)
     ui/images/               generated LVGL assets (flame icon)
   studio/                    Sanity Studio (schema, leaderboard tool, directory client)
 ```
