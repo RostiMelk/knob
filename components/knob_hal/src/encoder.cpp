@@ -18,7 +18,8 @@ static constexpr const char *TAG = "encoder";
 // Reference: Waveshare demo bidi_switch_knob.c
 
 static constexpr int POLL_INTERVAL_MS = 3; // Match Waveshare demo (3ms)
-static constexpr int DEBOUNCE_TICKS = 2;   // Consecutive readings before accept
+static constexpr int STABLE_TICKS = 2;     // Consecutive equal readings to
+                                           // accept a level as real
 
 static esp_timer_handle_t s_poll_timer;
 
@@ -27,36 +28,39 @@ static std::atomic<int32_t> s_steps{0};
 
 // Per-channel state
 struct ChannelState {
-  uint8_t prev_level;
-  uint8_t debounce_cnt;
+  uint8_t last_raw;   // last raw sample
+  uint8_t stable_cnt; // consecutive samples at last_raw
+  bool armed;         // stable low seen — allowed to fire on the next
+                      // stable high
 };
 
 static ChannelState s_chan_a;
 static ChannelState s_chan_b;
 
-// Process one encoder channel: detect rising edge with debounce
-// Returns true if a valid edge was detected
+// Arm/fire debounce: a step requires a debounced low (rest) followed by a
+// debounced high (pulse), and fires exactly once per pulse. Release bounce
+// can't double-fire because re-arming needs STABLE_TICKS of solid low.
 static bool process_channel(gpio_num_t pin, ChannelState &ch) {
   uint8_t level = gpio_get_level(pin);
 
-  if (level == 0) {
-    // Pin is low — reset debounce if it changed, otherwise count
-    if (level != ch.prev_level)
-      ch.debounce_cnt = 0;
-    else
-      ch.debounce_cnt++;
+  if (level == ch.last_raw) {
+    if (ch.stable_cnt < 255)
+      ch.stable_cnt++;
   } else {
-    // Pin is high — check for debounced rising edge
-    if (level != ch.prev_level && ++ch.debounce_cnt >= DEBOUNCE_TICKS) {
-      ch.debounce_cnt = 0;
-      ch.prev_level = level;
-      return true; // Valid rising edge
-    } else {
-      ch.debounce_cnt = 0;
-    }
+    ch.last_raw = level;
+    ch.stable_cnt = 1;
   }
+  if (ch.stable_cnt < STABLE_TICKS)
+    return false;
 
-  ch.prev_level = level;
+  if (level == 0) {
+    ch.armed = true; // resting between detents
+    return false;
+  }
+  if (ch.armed) {
+    ch.armed = false;
+    return true; // one step per debounced pulse
+  }
   return false;
 }
 
@@ -86,11 +90,14 @@ static void init_gpio() {
   cfg.intr_type = GPIO_INTR_DISABLE;
   ESP_ERROR_CHECK(gpio_config(&cfg));
 
-  // Initialize channel state with current levels
-  s_chan_a.prev_level = gpio_get_level(static_cast<gpio_num_t>(PIN_ENC_A));
-  s_chan_b.prev_level = gpio_get_level(static_cast<gpio_num_t>(PIN_ENC_B));
-  s_chan_a.debounce_cnt = 0;
-  s_chan_b.debounce_cnt = 0;
+  // Initialize channel state with current levels; channels arm themselves
+  // after the first debounced low.
+  s_chan_a.last_raw = gpio_get_level(static_cast<gpio_num_t>(PIN_ENC_A));
+  s_chan_b.last_raw = gpio_get_level(static_cast<gpio_num_t>(PIN_ENC_B));
+  s_chan_a.stable_cnt = 0;
+  s_chan_b.stable_cnt = 0;
+  s_chan_a.armed = false;
+  s_chan_b.armed = false;
 }
 
 void encoder_init() {
@@ -107,8 +114,7 @@ void encoder_init() {
   ESP_ERROR_CHECK(
       esp_timer_start_periodic(s_poll_timer, POLL_INTERVAL_MS * 1000LL));
 
-  ESP_LOGI(
-      TAG,
-      "Encoder ready (A=%d B=%d, bidi-switch mode, poll=%dms, debounce=%d)",
-      PIN_ENC_A, PIN_ENC_B, POLL_INTERVAL_MS, DEBOUNCE_TICKS);
+  ESP_LOGI(TAG,
+           "Encoder ready (A=%d B=%d, bidi-switch mode, poll=%dms, stable=%d)",
+           PIN_ENC_A, PIN_ENC_B, POLL_INTERVAL_MS, STABLE_TICKS);
 }

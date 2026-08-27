@@ -1,0 +1,26 @@
+{
+  "name": "@kaffi/studio",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "sanity dev",
+    "start": "sanity start",
+    "build": "sanity build",
+    "deploy": "sanity deploy",
+    "deploy:schema": "sanity schema deploy",
+    "typegen": "sanity typegen generate"
+  },
+  "dependencies": {
+    "@sanity/icons": "^5.2.1",
+    "@sanity/vision": "^6.10.1",
+    "react": "^19.2.2",
+    "react-dom": "^19.2.2",
+    "sanity": "^6.10.1",
+    "styled-components": "^6.1.15"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.0",
+    "typescript": "^5.7.0"
+  }
+}
