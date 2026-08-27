@@ -1,7 +1,6 @@
 set(SRCS
     "main.cpp"
     "wifi_picker.cpp"
-    "wifi_setup.cpp"
     "spotify_setup.cpp"
     "spotify/json_parse.cpp"
     "spotify/spotify_auth.cpp"
@@ -24,6 +23,7 @@ idf_component_register(
     REQUIRES
         knob_hal
         knob_net
+        knob_setup
         knob_storage
         knob_ui
         esp_event
