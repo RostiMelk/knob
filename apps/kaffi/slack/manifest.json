@@ -3,7 +3,7 @@
     "name": "Kaffi",
     "description": "Office coffee leaderboards from the kaffi knob",
     "background_color": "#3b2416",
-    "long_description": "*Kaffi* posts the office coffee leaderboard to Slack.\n\nEach office has a kaffi knob by the coffee machine. Turn it to pick your name, tap to log that you brewed a pot or took a cup. Every tap is an event in Sanity, and the scoreboard falls out of the event log: brewing earns credit, taking cups spends it. Positive balance makes you a hero, negative makes you a freeloader. Streaks reward the people who brew on consecutive weekdays.\n\nThis app posts that scoreboard on a schedule, once per office to the office's own channel, in the office's local time. It only posts. It reads no messages, has no commands, and runs no server: a scheduled Sanity Function calls chat.postMessage with a Block Kit summary and nothing else.\n\n*Permissions:* chat:write, and only in channels where @Kaffi has been invited.\n\n*Source and setup:* github.com/RostiMelk/knob, under apps/kaffi. Maintained by Knut Melvær and Rosti."
+    "long_description": "*Kaffi* posts the office coffee leaderboard to Slack.\n\nEach office has a kaffi knob by the coffee machine. Turn it to pick your name, tap to log that you brewed a pot or took a cup. Brewing earns credit, taking cups spends it. Positive balance makes you a hero, negative makes you a freeloader, and streaks reward the people who brew on consecutive weekdays.\n\nOn a schedule, Kaffi posts that scoreboard to each office's channel in the office's local time. Invite @Kaffi to a channel to get your office's leaderboard there."
   },
   "features": {
     "bot_user": {
