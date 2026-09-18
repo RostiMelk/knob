@@ -309,7 +309,6 @@ test("all three generators produce valid PNGs for populated and empty periods", 
         writeFileSync(join(directory, `${name}-${variant}.png`), png);
     }
   }
-  expect(renderCoffeeSummary(report)).toEqual(renderCoffeeSummary(report));
   if (directory) {
     for (const period of ["month", "quarter", "year"] as const)
       writeFileSync(

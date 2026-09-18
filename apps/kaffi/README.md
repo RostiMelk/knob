@@ -159,6 +159,10 @@ for the trend. Each renderer returns a PNG `Buffer`.
 Knut's integration owns fetching, scheduling, uploading, and Slack delivery.
 The generators make no network requests and do not write files.
 
+Footers randomly rotate through 16 messages, using all 16 before repeating.
+Any three consecutive images have different footers, even across pool refills.
+Render each report's images in the same process; the rotation is kept in memory.
+
 ```ts
 import { buildCoffeeReport } from "./reports/report-data.ts";
 import {

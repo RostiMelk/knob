@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { Resvg } from "@resvg/resvg-js";
 import { FIRST_POT_CUPS, EXTRA_POT_CUPS } from "../lib/coffee-stats.ts";
 import type { CoffeeReport } from "./report-data.ts";
+import { nextFooter } from "./report-footers.ts";
 
 const WIDTH = 1200;
 const HEIGHT = 800;
@@ -147,7 +148,7 @@ function frame(
     ${text(`${report.periodLabel}${report.toDate ? " TO DATE" : ""} / ${report.dateLabel.toUpperCase()}`, 40, 222, 19, { mono: true })}
     ${content}
     ${rule(741)}
-    ${text("BREWED BY PEOPLE. COUNTED BY SANITY.", 40, 775, 17, { mono: true })}
+    ${text(nextFooter().toUpperCase(), 40, 775, 17, { mono: true, width: 980 })}
     ${text("SANITY.IO", 1160, 775, 17, { mono: true, align: "end" })}
   </svg>`;
   return new Resvg(svg, { font }).render().asPng();
