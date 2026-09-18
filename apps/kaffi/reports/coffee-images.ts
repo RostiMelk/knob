@@ -140,7 +140,7 @@ function frame(
     <defs><pattern id="dots" width="12" height="12" patternUnits="userSpaceOnUse"><circle cx="1.5" cy="1.5" r="1.5" fill="${INK}"/><circle cx="7.5" cy="7.5" r="1.5" fill="${INK}"/></pattern></defs>
     ${rect(0, 0, WIDTH, HEIGHT, background)}
     <g transform="translate(40 31) scale(2.3)">${symbol}</g>
-    ${text("SANITY / COFFEE HERO", 92, 56, 19, { mono: true })}
+    ${text("SANITY / KAFFI", 92, 56, 19, { mono: true })}
     ${text(report.office.toUpperCase(), 1160, 56, 19, { mono: true, align: "end", width: 560 })}
     ${rule(82)}
     ${headline(title)}
@@ -213,7 +213,7 @@ export function renderCoffeeSummary(report: CoffeeReport): Buffer {
   return frame(
     report,
     ORANGE,
-    "THE COFFEE REPORT",
+    "THE KAFFI REPORT",
     stats
       .map(
         ([value, label], i) =>
@@ -418,7 +418,7 @@ export function renderCoffeeLeaderboard(report: CoffeeReport): Buffer {
   return frame(
     report,
     YELLOW,
-    "COFFEE HEROES",
+    "KAFFI HEROES",
     headings +
       rows +
       (report.participants
