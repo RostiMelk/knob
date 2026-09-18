@@ -2,6 +2,7 @@ import { aggregate, officeOf, type EventRow } from "../lib/coffee-stats.ts";
 
 export type CoffeeEvent = EventRow & { occurredAt: string };
 export type ReportOptions = {
+  /** Quarters and years follow Sanity's February–January fiscal calendar. */
   period: "week" | "month" | "quarter" | "year";
   /** Any office-local calendar date in the desired period (YYYY-MM-DD). */
   date: string;
@@ -36,13 +37,24 @@ function monday(date: Date) {
 
 function periodBounds(options: ReportOptions) {
   const start = calendarDate(options.date);
+  const fiscalMonth = (start.getUTCMonth() + 11) % 12;
+  const fiscalYear =
+    start.getUTCFullYear() + (start.getUTCMonth() === 0 ? 0 : 1);
+  const fiscalLabel = `FY${String(fiscalYear).slice(-2)}`;
+  const periodLabel =
+    options.period === "quarter"
+      ? `Q${Math.floor(fiscalMonth / 3) + 1} ${fiscalLabel}`
+      : options.period === "year"
+        ? fiscalLabel
+        : options.period.toUpperCase();
   if (options.period === "week")
     start.setUTCDate(start.getUTCDate() - ((start.getUTCDay() + 6) % 7));
   else {
     start.setUTCDate(1);
     if (options.period === "quarter")
-      start.setUTCMonth(Math.floor(start.getUTCMonth() / 3) * 3);
-    if (options.period === "year") start.setUTCMonth(0);
+      start.setUTCMonth(start.getUTCMonth() - (fiscalMonth % 3));
+    if (options.period === "year")
+      start.setUTCMonth(start.getUTCMonth() - fiscalMonth);
   }
   const end = new Date(start);
   if (options.period === "week") end.setUTCDate(end.getUTCDate() + 7);
@@ -58,7 +70,7 @@ function periodBounds(options: ReportOptions) {
     end.setTime(through.getTime());
     end.setUTCDate(end.getUTCDate() + 1);
   }
-  return { start, end, toDate: end < periodEnd };
+  return { start, end, periodLabel, toDate: end < periodEnd };
 }
 
 export function buildCoffeeReport(
@@ -72,7 +84,7 @@ export function buildCoffeeReport(
     month: "2-digit",
     day: "2-digit",
   });
-  const { start, end, toDate } = periodBounds(options);
+  const { start, end, periodLabel, toDate } = periodBounds(options);
   const from = dateKey(start);
   const to = dateKey(end);
   const monthly = options.period === "year";
@@ -150,6 +162,7 @@ export function buildCoffeeReport(
   });
   return {
     period: options.period,
+    periodLabel,
     toDate,
     office: options.office,
     timeZone: options.timeZone,

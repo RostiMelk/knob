@@ -144,7 +144,7 @@ function frame(
     ${text(report.office.toUpperCase(), 1160, 56, 19, { mono: true, align: "end", width: 560 })}
     ${rule(82)}
     ${headline(title)}
-    ${text(`${report.period.toUpperCase()}${report.toDate ? " TO DATE" : ""} / ${report.dateLabel.toUpperCase()}`, 40, 222, 19, { mono: true })}
+    ${text(`${report.periodLabel}${report.toDate ? " TO DATE" : ""} / ${report.dateLabel.toUpperCase()}`, 40, 222, 19, { mono: true })}
     ${content}
     ${rule(741)}
     ${text("BREWED BY PEOPLE. COUNTED BY SANITY.", 40, 775, 17, { mono: true })}

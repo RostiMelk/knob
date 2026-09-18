@@ -192,7 +192,13 @@ queries produce incomplete totals. For an ongoing period, supply `through` to om
 future buckets and label the period "TO DATE". No previous-period comparison is
 inferred from missing data.
 
-Weeks run Monday through Sunday. `from` is inclusive and `to` exclusive; both
+Weeks run Monday through Sunday. Fiscal years run February through January and
+use the ending year: FY27 is February 1, 2026 through January 31, 2027.
+Quarters start in February, May, August, and November, so September 2026 is
+Q3 FY27. Quarter/year report bounds, buckets, and image labels follow this calendar;
+week/month reports use calendar weeks/months.
+
+`from` is inclusive and `to` exclusive; both
 are office-local calendar dates, not UTC query timestamps. Event timestamps must
 include an offset or `Z`. Office names match exactly; unstamped events belong to
 Oslo. Invalid timestamps and non-positive/non-integer quantities throw. Directory

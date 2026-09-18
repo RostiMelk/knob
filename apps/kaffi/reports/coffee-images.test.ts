@@ -80,8 +80,8 @@ test("office-local periods preserve brew-action credits, names, and empty days",
 test("calendar buckets cover leap months, quarters, year rollover, and DST", () => {
   for (const [period, date, from, to, count] of [
     ["month", "2024-02-20", "2024-02-01", "2024-03-01", 21],
-    ["quarter", "2026-11-16", "2026-10-01", "2027-01-01", 14],
-    ["year", "2026-12-31", "2026-01-01", "2027-01-01", 12],
+    ["quarter", "2026-11-16", "2026-11-01", "2027-02-01", 14],
+    ["year", "2026-12-31", "2026-02-01", "2027-02-01", 12],
   ] as const) {
     const report = buildCoffeeReport([], { ...options, period, date });
     expect([report.from, report.to, report.buckets.length]).toEqual([
@@ -110,6 +110,53 @@ test("calendar buckets cover leap months, quarters, year rollover, and DST", () 
   expect(friday.pots).toBe(2);
 });
 
+test("fiscal labels and bounds roll over in February, including January's previous-year quarter", () => {
+  for (const [period, date, from, to, periodLabel] of [
+    ["quarter", "2026-01-31", "2025-11-01", "2026-02-01", "Q4 FY26"],
+    ["quarter", "2026-02-01", "2026-02-01", "2026-05-01", "Q1 FY27"],
+    ["quarter", "2026-05-01", "2026-05-01", "2026-08-01", "Q2 FY27"],
+    ["quarter", "2026-09-18", "2026-08-01", "2026-11-01", "Q3 FY27"],
+    ["quarter", "2027-01-31", "2026-11-01", "2027-02-01", "Q4 FY27"],
+    ["year", "2026-01-31", "2025-02-01", "2026-02-01", "FY26"],
+    ["year", "2026-02-01", "2026-02-01", "2027-02-01", "FY27"],
+    ["year", "2027-01-31", "2026-02-01", "2027-02-01", "FY27"],
+    ["year", "2027-02-01", "2027-02-01", "2028-02-01", "FY28"],
+  ] as const) {
+    expect(buildCoffeeReport([], { ...options, period, date })).toMatchObject({
+      from,
+      to,
+      periodLabel,
+      toDate: false,
+    });
+  }
+  const year = buildCoffeeReport(
+    [
+      event({ occurredAt: "2026-02-01T07:59:59Z", quantity: 100 }),
+      event({ occurredAt: "2026-02-01T08:00:00Z" }),
+      event({ occurredAt: "2027-02-01T07:59:59Z", quantity: 2 }),
+      event({ occurredAt: "2027-02-01T08:00:00Z", quantity: 100 }),
+    ],
+    { ...options, period: "year" },
+  );
+  expect(year.pots).toBe(3);
+  expect(year.buckets.map(({ label }) => label)).toEqual([
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+    "Jan",
+  ]);
+  expect(year.buckets[0].pots).toBe(1);
+  expect(year.buckets[11].pots).toBe(2);
+});
+
 test("quarter-to-date totals clip to the quarter and cutoff, retaining weekends in weekly buckets", () => {
   const quarter = {
     ...options,
@@ -118,8 +165,8 @@ test("quarter-to-date totals clip to the quarter and cutoff, retaining weekends 
   } satisfies ReportOptions;
   const report = buildCoffeeReport(
     [
-      event({ occurredAt: "2026-07-01T06:59:59Z", quantity: 100 }),
-      event({ occurredAt: "2026-07-01T07:00:00Z" }),
+      event({ occurredAt: "2026-08-01T06:59:59Z", quantity: 100 }),
+      event({ occurredAt: "2026-08-01T07:00:00Z" }),
       event({ occurredAt: "2026-09-13T16:00:00Z", kind: "cup", quantity: 2 }),
       event({ quantity: 2 }),
       event({ occurredAt: "2026-09-18T16:00:00Z", kind: "cup", quantity: 3 }),
@@ -133,31 +180,32 @@ test("quarter-to-date totals clip to the quarter and cutoff, retaining weekends 
     report.toDate,
     report.pots,
     report.cups,
-  ]).toEqual(["2026-07-01", "2026-09-19", true, 3, 5]);
-  expect(report.buckets).toHaveLength(12);
+  ]).toEqual(["2026-08-01", "2026-09-19", true, 3, 5]);
+  expect(report.buckets).toHaveLength(8);
+  expect(report.periodLabel).toBe("Q3 FY27");
   expect(report.buckets[0]).toEqual({
-    label: "Jul 1",
+    label: "Aug 1",
     pots: 1,
     cups: 0,
     partial: true,
   });
-  expect(report.buckets[10]).toEqual({
+  expect(report.buckets[6]).toEqual({
     label: "Sep 7",
     pots: 0,
     cups: 2,
     partial: false,
   });
-  expect(report.buckets[11]).toEqual({
+  expect(report.buckets[7]).toEqual({
     label: "Sep 14",
     pots: 2,
     cups: 3,
     partial: true,
   });
   expect(() =>
-    buildCoffeeReport([], { ...quarter, through: "2026-10-01" }),
+    buildCoffeeReport([], { ...quarter, through: "2026-11-01" }),
   ).toThrow("within the report period");
   expect(() =>
-    buildCoffeeReport([], { ...quarter, through: "2026-06-30" }),
+    buildCoffeeReport([], { ...quarter, through: "2026-07-31" }),
   ).toThrow("within the report period");
   expect(renderCoffeeTrend(report).readUInt32BE(16)).toBe(1200);
 });
