@@ -1,0 +1,10 @@
+{
+  "apps": {
+    "T02AAEL0P": {
+      "app_id": "A0C2W442UES",
+      "team_domain": "sanity-io",
+      "team_id": "T02AAEL0P"
+    }
+  },
+  "default": "sanity-io"
+}

@@ -1,0 +1,23 @@
+{
+  "display_information": {
+    "name": "Kaffi",
+    "description": "Office coffee leaderboards from the kaffi knob",
+    "background_color": "#3b2416"
+  },
+  "features": {
+    "bot_user": {
+      "display_name": "Kaffi",
+      "always_online": false
+    }
+  },
+  "oauth_config": {
+    "scopes": {
+      "bot": ["chat:write"]
+    }
+  },
+  "settings": {
+    "org_deploy_enabled": false,
+    "socket_mode_enabled": false,
+    "token_rotation_enabled": false
+  }
+}
