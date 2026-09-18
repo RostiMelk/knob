@@ -173,25 +173,24 @@ export function renderCoffeeSummary(report: CoffeeReport): Buffer {
     );
   const highlight = top
     ? text(
-        tied ? "LEADING BREWER / TIED FOR FIRST" : "THE PERSON BEHIND THE POTS",
+        tied ? "LEADING BREWER / TIED FOR FIRST" : "LEADING BREWER",
         40,
         474,
         18,
         { mono: true },
       ) +
-      text(top.name, 40, 565, 64, { width: 790 }) +
-      text(
-        `${number.format(top.pots)} ${top.pots === 1 ? "pot" : "pots"} brewed / ${number.format(top.cups)} ${top.cups === 1 ? "cup" : "cups"} taken`,
-        40,
-        614,
-        22,
-        { mono: true, width: 780 },
-      ) +
-      text(signed(top.balance), 1160, 565, 84, {
-        align: "end",
-        width: 210,
-      }) +
-      text("BALANCE", 1160, 612, 19, { mono: true, align: "end" })
+      text(top.name, 40, 555, 64, { width: 1120 }) +
+      [
+        [number.format(top.pots), "POTS BREWED"],
+        [number.format(top.cups), "CUPS TAKEN"],
+        [signed(top.balance), "BALANCE"],
+      ]
+        .map(
+          ([value, label], i) =>
+            text(value, 40 + i * 380, 644, 42, { width: 320 }) +
+            text(label, 40 + i * 380, 678, 17, { mono: true }),
+        )
+        .join("")
     : text("EVERY GOOD DAY STARTS WITH A POT.", 40, 476, 18, {
         mono: true,
       }) +
@@ -222,11 +221,7 @@ export function renderCoffeeSummary(report: CoffeeReport): Buffer {
       )
       .join("") +
       rule(430) +
-      highlight +
-      text(BALANCE_RULE, 40, 682, 16, {
-        mono: true,
-        width: 1060,
-      }),
+      highlight,
   );
 }
 
