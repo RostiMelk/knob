@@ -16,72 +16,18 @@ import { useClient } from "sanity";
 
 import { API_VERSION, useDirectoryPeople } from "../lib/directory";
 
-// Mirrors the knob: balance = brew credit - cups. The first pot of a brew
-// event is worth 4 cups; extra pots in the same event only 2 each (brewing
-// a second pot is barely more hassle once you're already at it).
-const FIRST_POT_CUPS = 4;
-const EXTRA_POT_CUPS = 2;
-
-function brewCredit(pots: number) {
-  if (pots <= 0) return 0;
-  return FIRST_POT_CUPS + (pots - 1) * EXTRA_POT_CUPS;
-}
-
-type EventRow = {
-  personId: string;
-  personName?: string;
-  kind: "brew" | "cup";
-  quantity: number;
-  office?: string;
-};
-
-// Events written before multi-office support carry no office stamp.
-const DEFAULT_OFFICE = "Oslo";
-
-function officeOf(ev: EventRow) {
-  return ev.office || DEFAULT_OFFICE;
-}
-
-type Standing = {
-  personId: string;
-  name: string;
-  pots: number;
-  cups: number;
-  credit: number;
-  balance: number;
-};
+import {
+  aggregate,
+  officeOf,
+  FIRST_POT_CUPS,
+  EXTRA_POT_CUPS,
+  type EventRow,
+} from "../../lib/coffee-stats";
 
 const MEDAL_TONES = ["caution", "default", "primary"] as const;
 
 function yearStartIso() {
   return `${new Date().getFullYear()}-01-01T00:00:00Z`;
-}
-
-function aggregate(events: EventRow[]): Standing[] {
-  const byPerson = new Map<string, Standing>();
-  for (const ev of events) {
-    let s = byPerson.get(ev.personId);
-    if (!s) {
-      s = {
-        personId: ev.personId,
-        name: ev.personName || "Unknown",
-        pots: 0,
-        cups: 0,
-        credit: 0,
-        balance: 0,
-      };
-      byPerson.set(ev.personId, s);
-    }
-    if (ev.kind === "brew") {
-      s.pots += ev.quantity ?? 1;
-      s.credit += brewCredit(ev.quantity ?? 1);
-    } else if (ev.kind === "cup") {
-      s.cups += ev.quantity ?? 1;
-    }
-  }
-  const standings = [...byPerson.values()];
-  for (const s of standings) s.balance = s.credit - s.cups;
-  return standings.sort((a, b) => b.balance - a.balance || b.pots - a.pots);
 }
 
 export function LeaderboardTool() {
