@@ -1,0 +1,12 @@
+{
+  "name": "kaffi-slack-app",
+  "private": true,
+  "description": "Slack app definition for the Kaffi bot. The manifest is the source of truth; the bot token is used by the Sanity scheduled functions in ../blueprint.",
+  "scripts": {
+    "validate": "slack manifest validate",
+    "install:workspace": "slack app install"
+  },
+  "devDependencies": {
+    "@slack/cli-hooks": "^2.0.0"
+  }
+}
