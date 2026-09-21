@@ -132,7 +132,7 @@ function headline(title: string) {
       x += widths[i];
       const spacer =
         i < words.length - 1 && textureWidth > 0
-          ? `<g transform="translate(${x + (gap - textureWidth) / 2} 124)">${rect(0, 0, textureWidth, DOT_TILE * 4, "url(#dots)")}</g>`
+          ? `<g transform="translate(${x + (gap - textureWidth) / 2} 118)">${rect(0, 0, textureWidth, DOT_TILE * 5, "url(#dots)")}</g>`
           : "";
       x += gap;
       return label + spacer;
