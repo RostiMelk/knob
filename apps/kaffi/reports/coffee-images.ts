@@ -14,6 +14,7 @@ const WHITE = "#ffffff";
 const FONT = "KMR Waldenburg";
 const MONO = "IBM Plex Mono";
 const TYPE = { headline: 78, value: 64, body: 32, label: 18 };
+const DOT_TILE = 12;
 const font = {
   loadSystemFonts: false,
   fontFiles: ["waldenburg-normal.ttf", "ibm-plex-mono-regular.ttf"].map(
@@ -120,14 +121,18 @@ function headline(title: string) {
   const widths = words.map((word) => textWidth(word, TYPE.headline, FONT));
   const gap =
     (1120 - widths.reduce((sum, width) => sum + width, 0)) / (words.length - 1);
+  const textureWidth = Math.max(
+    0,
+    Math.floor((gap - 24) / DOT_TILE) * DOT_TILE,
+  );
   let x = 40;
   return words
     .map((word, i) => {
       const label = text(word, x, 176, TYPE.headline);
       x += widths[i];
       const spacer =
-        i < words.length - 1
-          ? rect(x + 12, 120, gap - 24, 56, "url(#dots)")
+        i < words.length - 1 && textureWidth > 0
+          ? `<g transform="translate(${x + (gap - textureWidth) / 2} 124)">${rect(0, 0, textureWidth, DOT_TILE * 4, "url(#dots)")}</g>`
           : "";
       x += gap;
       return label + spacer;
@@ -144,7 +149,7 @@ function frame(
   // Hex-dot geometry and symbol match www-sanity-io's engineering OG assets.
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}" viewBox="0 0 ${WIDTH} ${HEIGHT}">
     <title>${escapeXml(`${title}: ${report.office}, ${report.dateLabel}`)}</title>
-    <defs><pattern id="dots" width="12" height="12" patternUnits="userSpaceOnUse"><circle cx="1.5" cy="1.5" r="1.5" fill="${INK}"/><circle cx="7.5" cy="7.5" r="1.5" fill="${INK}"/></pattern></defs>
+    <defs><pattern id="dots" width="${DOT_TILE}" height="${DOT_TILE}" patternUnits="userSpaceOnUse"><circle cx="3" cy="3" r="1.5" fill="${INK}"/><circle cx="9" cy="9" r="1.5" fill="${INK}"/></pattern></defs>
     ${rect(0, 0, WIDTH, HEIGHT, background)}
     <g transform="translate(40 31) scale(2.3)">${symbol}</g>
     ${text("SANITY / KAFFI", 92, 56, TYPE.label, { mono: true })}
