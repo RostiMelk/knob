@@ -151,7 +151,7 @@ apps/kaffi/
 Three separate **1200 × 800 PNGs** keep each report readable in Slack:
 
 - `renderCoffeeSummary`: totals, participation, and the highest-ranked brewer.
-- `renderCoffeeLeaderboard`: top five participants by balance, then pots. Ties share a rank.
+- `renderCoffeeLeaderboard`: top five participants and the last participant by balance, then pots. The final row keeps its actual rank and normal row spacing. A zigzag divider marks skipped participants. Ties share a rank; groups of five or fewer appear once.
 - `renderCoffeeTrend`: pots/cups lines with points on one zero-based count axis. Weekdays for a week/month, weeks for a quarter, and months for a year. Weekend activity stays in report totals, rankings, and weekly/monthly buckets. Partial weeks use open points, dashed segments, and an asterisk. These are logged counts, not pot capacity or estimated consumption.
 
 Use a weekly report for the summary and leaderboard, plus a quarter-to-date report
