@@ -127,7 +127,7 @@ function headline(title: string) {
       x += widths[i];
       const spacer =
         i < words.length - 1
-          ? rect(x + 24, 120, gap - 48, 56, "url(#dots)")
+          ? rect(x + 12, 120, gap - 24, 56, "url(#dots)")
           : "";
       x += gap;
       return label + spacer;
@@ -417,11 +417,11 @@ export function renderCoffeeLeaderboard(report: CoffeeReport): Buffer {
     })
     .join("");
   const headings =
-    text("RANK / PERSON", 62, 272, TYPE.label, { mono: true }) +
+    text("RANK / PERSON", 40, 272, TYPE.label, { mono: true }) +
     [
       { title: "POTS", x: 835 },
       { title: "CUPS", x: 975 },
-      { title: "BALANCE", x: 1136 },
+      { title: "BALANCE", x: 1160 },
     ]
       .map(({ title, x }) =>
         text(title, x, 272, TYPE.label, { mono: true, align: "end" }),
