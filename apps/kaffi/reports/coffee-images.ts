@@ -13,6 +13,7 @@ const YELLOW = "#ffff00";
 const WHITE = "#ffffff";
 const FONT = "KMR Waldenburg";
 const MONO = "IBM Plex Mono";
+const TYPE = { headline: 78, value: 64, body: 32, label: 18 };
 const font = {
   loadSystemFonts: false,
   fontFiles: ["waldenburg-normal.ttf", "ibm-plex-mono-regular.ttf"].map(
@@ -64,24 +65,29 @@ function text(
     mono?: boolean;
     align?: "start" | "end" | "middle";
     width?: number;
+    truncate?: boolean;
   } = {},
 ) {
   const family = options.mono ? MONO : FONT;
   let label = String(value);
   const measure = (content: string) => textWidth(content, size, family);
-  if (options.width) {
+  const width = options.width;
+  if (width) {
     const measured = measure(label);
-    if (measured > options.width) {
-      size = Math.max(Math.min(size, 24), (size * options.width) / measured);
-      if (measure(label) > options.width) {
+    if (measured > width) {
+      if (!options.truncate)
+        size =
+          Object.values(TYPE).find(
+            (candidate) =>
+              candidate <= size && textWidth(label, candidate, family) <= width,
+          ) ?? TYPE.label;
+      if (measure(label) > width) {
         const characters = Array.from(label);
         let low = 0,
           high = characters.length;
         while (low < high) {
           const middle = Math.ceil((low + high) / 2);
-          if (
-            measure(characters.slice(0, middle).join("") + "…") <= options.width
-          )
+          if (measure(characters.slice(0, middle).join("") + "…") <= width)
             low = middle;
           else high = middle - 1;
         }
@@ -111,13 +117,13 @@ function signed(value: number) {
 
 function headline(title: string) {
   const words = title.split(" ");
-  const widths = words.map((word) => textWidth(word, 78, FONT));
+  const widths = words.map((word) => textWidth(word, TYPE.headline, FONT));
   const gap =
     (1120 - widths.reduce((sum, width) => sum + width, 0)) / (words.length - 1);
   let x = 40;
   return words
     .map((word, i) => {
-      const label = text(word, x, 176, 78);
+      const label = text(word, x, 176, TYPE.headline);
       x += widths[i];
       const spacer =
         i < words.length - 1
@@ -141,15 +147,15 @@ function frame(
     <defs><pattern id="dots" width="12" height="12" patternUnits="userSpaceOnUse"><circle cx="1.5" cy="1.5" r="1.5" fill="${INK}"/><circle cx="7.5" cy="7.5" r="1.5" fill="${INK}"/></pattern></defs>
     ${rect(0, 0, WIDTH, HEIGHT, background)}
     <g transform="translate(40 31) scale(2.3)">${symbol}</g>
-    ${text("SANITY / KAFFI", 92, 56, 19, { mono: true })}
-    ${text(report.office.toUpperCase(), 1160, 56, 19, { mono: true, align: "end", width: 560 })}
+    ${text("SANITY / KAFFI", 92, 56, TYPE.label, { mono: true })}
+    ${text(report.office.toUpperCase(), 1160, 56, TYPE.label, { mono: true, align: "end", width: 560 })}
     ${rule(82)}
     ${headline(title)}
-    ${text(`${report.periodLabel}${report.toDate ? " TO DATE" : ""} / ${report.dateLabel.toUpperCase()}`, 40, 222, 19, { mono: true })}
+    ${text(`${report.periodLabel}${report.toDate ? " TO DATE" : ""} / ${report.dateLabel.toUpperCase()}`, 40, 222, TYPE.label, { mono: true })}
     ${content}
     ${rule(741)}
-    ${text(nextFooter().toUpperCase(), 40, 775, 17, { mono: true, width: 980 })}
-    ${text("SANITY.IO", 1160, 775, 17, { mono: true, align: "end" })}
+    ${text(nextFooter().toUpperCase(), 40, 775, TYPE.label, { mono: true, width: 980 })}
+    ${text("SANITY.IO", 1160, 775, TYPE.label, { mono: true, align: "end" })}
   </svg>`;
   return new Resvg(svg, { font }).render().asPng();
 }
@@ -177,10 +183,10 @@ export function renderCoffeeSummary(report: CoffeeReport): Buffer {
         tied ? "LEADING BREWER / TIED FOR FIRST" : "LEADING BREWER",
         40,
         474,
-        18,
+        TYPE.label,
         { mono: true },
       ) +
-      text(top.name, 40, 555, 64, { width: 1120 }) +
+      text(top.name, 40, 555, TYPE.value, { width: 1120, truncate: true }) +
       [
         [number.format(top.pots), "POTS BREWED"],
         [number.format(top.cups), "CUPS TAKEN"],
@@ -188,18 +194,18 @@ export function renderCoffeeSummary(report: CoffeeReport): Buffer {
       ]
         .map(
           ([value, label], i) =>
-            text(value, 40 + i * 380, 644, 42, { width: 320 }) +
-            text(label, 40 + i * 380, 678, 17, { mono: true }),
+            text(value, 40 + i * 284, 644, TYPE.value, { width: 248 }) +
+            text(label, 40 + i * 284, 684, TYPE.label, { mono: true }),
         )
         .join("")
-    : text("EVERY GOOD DAY STARTS WITH A POT.", 40, 476, 18, {
+    : text("EVERY GOOD DAY STARTS WITH A POT.", 40, 476, TYPE.label, {
         mono: true,
       }) +
       text(
         report.participants ? "Who's brewing next?" : "A fresh start.",
         40,
         565,
-        64,
+        TYPE.value,
         { width: 1000 },
       ) +
       text(
@@ -208,7 +214,8 @@ export function renderCoffeeSummary(report: CoffeeReport): Buffer {
           : "No coffee activity recorded for this period.",
         40,
         620,
-        22,
+        TYPE.label,
+        { mono: true },
       );
   return frame(
     report,
@@ -217,8 +224,9 @@ export function renderCoffeeSummary(report: CoffeeReport): Buffer {
     stats
       .map(
         ([value, label], i) =>
-          text(number.format(value), 40 + i * 284, 350, 94, { width: 248 }) +
-          text(label, 40 + i * 284, 391, 18, { mono: true }),
+          text(number.format(value), 40 + i * 284, 350, TYPE.value, {
+            width: 248,
+          }) + text(label, 40 + i * 284, 391, TYPE.label, { mono: true }),
       )
       .join("") +
       rule(430) +
@@ -254,7 +262,7 @@ export function renderCoffeeTrend(report: CoffeeReport): Buffer {
     const baseline = bottom - (i * height) / 4;
     return (
       rect(left, baseline, width, 1, "#d6d6d6") +
-      text(number.format(i * step), left - 18, baseline + 6, 17, {
+      text(number.format(i * step), left - 18, baseline + 6, TYPE.label, {
         mono: true,
         align: "end",
         width: 68,
@@ -284,9 +292,16 @@ export function renderCoffeeTrend(report: CoffeeReport): Buffer {
       const last = points.at(-1);
       if (!last) return "";
       const other = key === "pots" ? "cups" : "pots";
+      const labelCenter = Math.min(
+        bottom - TYPE.label,
+        Math.max(
+          bottom - height + TYPE.label,
+          (y(last.pots) + y(last.cups)) / 2,
+        ),
+      );
       const labelY =
-        Math.abs(y(last[key]) - y(last[other])) < 34
-          ? y(last[key]) + (key === "cups" ? -17 : 17)
+        Math.abs(y(last[key]) - y(last[other])) < TYPE.label * 2
+          ? labelCenter + (key === "cups" ? -TYPE.label : TYPE.label)
           : y(last[key]);
       return (
         segments +
@@ -295,7 +310,7 @@ export function renderCoffeeTrend(report: CoffeeReport): Buffer {
           `${number.format(last[key])} ${key.toUpperCase()}${last.partial ? "*" : ""}`,
           left + width + 24,
           labelY + 6,
-          18,
+          TYPE.label,
           { mono: true, color, width: 148 },
         )
       );
@@ -303,12 +318,13 @@ export function renderCoffeeTrend(report: CoffeeReport): Buffer {
     .join("");
   const labels = points
     .map((point, i) =>
-      i % labelEvery === 0 || i === points.length - 1
+      i === points.length - 1 ||
+      (i % labelEvery === 0 && points.length - 1 - i >= labelEvery)
         ? text(
             point.label + (point.partial ? "*" : ""),
             point.x,
             bottom + 30,
-            16,
+            TYPE.label,
             { mono: true, align: "middle" },
           )
         : "",
@@ -316,10 +332,10 @@ export function renderCoffeeTrend(report: CoffeeReport): Buffer {
     .join("");
   const legend =
     rect(40, 270, 28, 3, INK) +
-    text("POTS BREWED", 80, 279, 18, { mono: true }) +
+    text("POTS BREWED", 80, 279, TYPE.label, { mono: true }) +
     rect(282, 270, 28, 3, ORANGE) +
-    text("CUPS TAKEN", 322, 279, 18, { mono: true }) +
-    text("LOGGED COUNTS", 1160, 279, 17, { mono: true, align: "end" });
+    text("CUPS TAKEN", 322, 279, TYPE.label, { mono: true }) +
+    text("LOGGED COUNTS", 1160, 279, TYPE.label, { mono: true, align: "end" });
   const daily = report.period === "week" || report.period === "month";
   const data = hasActivity
     ? lines
@@ -327,7 +343,7 @@ export function renderCoffeeTrend(report: CoffeeReport): Buffer {
         daily ? "No weekday activity recorded" : "No activity recorded",
         624,
         476,
-        30,
+        TYPE.body,
         { align: "middle" },
       );
   return frame(
@@ -342,11 +358,14 @@ export function renderCoffeeTrend(report: CoffeeReport): Buffer {
         `${report.timeZone} / ${daily ? "Weekdays only" : report.period === "quarter" ? "Weekly totals" : "Monthly totals"}`,
         40,
         720,
-        15,
+        TYPE.label,
         { mono: true },
       ) +
       (report.buckets.some((bucket) => bucket.partial)
-        ? text("* PARTIAL WEEK", 1160, 720, 15, { mono: true, align: "end" })
+        ? text("* PARTIAL WEEK", 1160, 720, TYPE.label, {
+            mono: true,
+            align: "end",
+          })
         : ""),
   );
 }
@@ -366,27 +385,28 @@ export function renderCoffeeLeaderboard(report: CoffeeReport): Buffer {
       const y = 327 + i * 70;
       return (
         (i === 0 ? rect(40, y - 39, 1120, 64, INK) : "") +
-        text(String(rank).padStart(2, "0"), 62, y + 4, 25, {
+        text(String(rank).padStart(2, "0"), 62, y + 4, TYPE.body, {
           mono: true,
           color: i === 0 ? YELLOW : INK,
         }) +
-        text(person.name, 135, y + 4, 30, {
+        text(person.name, 135, y + 4, TYPE.body, {
           color: i === 0 ? WHITE : INK,
           width: 590,
+          truncate: true,
         }) +
-        text(number.format(person.pots), 835, y + 4, 27, {
+        text(number.format(person.pots), 835, y + 4, TYPE.body, {
           mono: true,
           color: i === 0 ? WHITE : INK,
           align: "end",
           width: 100,
         }) +
-        text(number.format(person.cups), 975, y + 4, 27, {
+        text(number.format(person.cups), 975, y + 4, TYPE.body, {
           mono: true,
           color: i === 0 ? WHITE : INK,
           align: "end",
           width: 100,
         }) +
-        text(signed(person.balance), 1136, y + 4, 30, {
+        text(signed(person.balance), 1136, y + 4, TYPE.body, {
           mono: true,
           color: i === 0 ? YELLOW : INK,
           align: "end",
@@ -397,14 +417,14 @@ export function renderCoffeeLeaderboard(report: CoffeeReport): Buffer {
     })
     .join("");
   const headings =
-    text("RANK / PERSON", 62, 272, 17, { mono: true }) +
+    text("RANK / PERSON", 62, 272, TYPE.label, { mono: true }) +
     [
       { title: "POTS", x: 835 },
       { title: "CUPS", x: 975 },
       { title: "BALANCE", x: 1136 },
     ]
       .map(({ title, x }) =>
-        text(title, x, 272, 17, { mono: true, align: "end" }),
+        text(title, x, 272, TYPE.label, { mono: true, align: "end" }),
       )
       .join("");
   const note =
@@ -419,17 +439,23 @@ export function renderCoffeeLeaderboard(report: CoffeeReport): Buffer {
       rows +
       (report.participants
         ? ""
-        : text("No heroes on the board yet. Brew the first pot.", 62, 400, 34, {
-            width: 1060,
-          })) +
+        : text(
+            "No heroes on the board yet. Brew the first pot.",
+            62,
+            400,
+            TYPE.body,
+            {
+              width: 1060,
+            },
+          )) +
       text(
         note +
           "Ranked by balance, then pots brewed. Equal scores share a rank.",
         40,
         682,
-        17,
+        TYPE.label,
         { mono: true, width: 1120 },
       ) +
-      text(BALANCE_RULE, 40, 713, 16, { mono: true, width: 1120 }),
+      text(BALANCE_RULE, 40, 713, TYPE.label, { mono: true, width: 1120 }),
   );
 }
