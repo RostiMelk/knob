@@ -375,6 +375,38 @@ export function renderCoffeeTrend(report: CoffeeReport): Buffer {
   );
 }
 
+function standingCells(
+  person: CoffeeReport["standings"][number],
+  y: number,
+  highlight = false,
+): string {
+  return (
+    text(person.name, 135, y, TYPE.body, {
+      color: highlight ? WHITE : INK,
+      width: 590,
+      truncate: true,
+    }) +
+    text(number.format(person.pots), 835, y, TYPE.body, {
+      mono: true,
+      color: highlight ? WHITE : INK,
+      align: "end",
+      width: 100,
+    }) +
+    text(number.format(person.cups), 975, y, TYPE.body, {
+      mono: true,
+      color: highlight ? WHITE : INK,
+      align: "end",
+      width: 100,
+    }) +
+    text(signed(person.balance), 1136, y, TYPE.body, {
+      mono: true,
+      color: highlight ? YELLOW : INK,
+      align: "end",
+      width: 140,
+    })
+  );
+}
+
 /** Top five participants, ranked by balance, then pots. Equal scores share a rank. */
 export function renderCoffeeLeaderboard(report: CoffeeReport): Buffer {
   let rank = 1;
@@ -387,36 +419,14 @@ export function renderCoffeeLeaderboard(report: CoffeeReport): Buffer {
         (previous.balance !== person.balance || previous.pots !== person.pots)
       )
         rank = i + 1;
-      const y = 327 + i * 70;
+      const y = 319 + i * 60;
       return (
-        (i === 0 ? rect(40, y - 39, 1120, 64, INK) : "") +
+        (i === 0 ? rect(40, y - 31, 1120, 54, INK) : "") +
         text(String(rank).padStart(2, "0"), 62, y + 4, TYPE.body, {
           mono: true,
           color: i === 0 ? YELLOW : INK,
         }) +
-        text(person.name, 135, y + 4, TYPE.body, {
-          color: i === 0 ? WHITE : INK,
-          width: 590,
-          truncate: true,
-        }) +
-        text(number.format(person.pots), 835, y + 4, TYPE.body, {
-          mono: true,
-          color: i === 0 ? WHITE : INK,
-          align: "end",
-          width: 100,
-        }) +
-        text(number.format(person.cups), 975, y + 4, TYPE.body, {
-          mono: true,
-          color: i === 0 ? WHITE : INK,
-          align: "end",
-          width: 100,
-        }) +
-        text(signed(person.balance), 1136, y + 4, TYPE.body, {
-          mono: true,
-          color: i === 0 ? YELLOW : INK,
-          align: "end",
-          width: 140,
-        }) +
+        standingCells(person, y + 4, i === 0) +
         (i > 0 ? rule(y + 25) : "")
       );
     })
@@ -432,6 +442,18 @@ export function renderCoffeeLeaderboard(report: CoffeeReport): Buffer {
         text(title, x, 272, TYPE.label, { mono: true, align: "end" }),
       )
       .join("");
+  const nextBrewer = report.standings.at(-1);
+  const tied =
+    nextBrewer && report.standings.at(-2)?.balance === nextBrewer.balance;
+  const nextPot = nextBrewer
+    ? text(
+        `NEXT POT’S ON…${tied ? " (TIED LOWEST BALANCE)" : ""}`,
+        40,
+        612,
+        TYPE.label,
+        { mono: true },
+      ) + standingCells(nextBrewer, 648)
+    : "";
   const note =
     report.participants > 5
       ? `Top 5 of ${report.participants} participants. `
@@ -442,6 +464,7 @@ export function renderCoffeeLeaderboard(report: CoffeeReport): Buffer {
     "KAFFI HEROES",
     headings +
       rows +
+      nextPot +
       (report.participants
         ? ""
         : text(
