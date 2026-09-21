@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { Resvg } from "@resvg/resvg-js";
-import { FIRST_POT_CUPS, EXTRA_POT_CUPS } from "../lib/coffee-stats.ts";
 import type { CoffeeReport } from "./report-data.ts";
 import { nextFooter } from "./report-footers.ts";
 
@@ -27,7 +26,6 @@ const symbol = readFileSync(
   "utf8",
 );
 const number = new Intl.NumberFormat("en-US");
-const BALANCE_RULE = `${FIRST_POT_CUPS} credits for the first pot + ${EXTRA_POT_CUPS} per extra pot in a brew, minus cups taken.`;
 
 function escapeXml(value: string | number) {
   return String(value)
@@ -407,11 +405,10 @@ function standingCells(
   );
 }
 
-/** Top five participants, ranked by balance, then pots. Equal scores share a rank. */
+/** Top five and last participant, ranked by balance, then pots. Ties share a rank. */
 export function renderCoffeeLeaderboard(report: CoffeeReport): Buffer {
   let rank = 1;
   const rows = report.standings
-    .slice(0, 5)
     .map((person, i) => {
       const previous = report.standings[i - 1];
       if (
@@ -419,15 +416,20 @@ export function renderCoffeeLeaderboard(report: CoffeeReport): Buffer {
         (previous.balance !== person.balance || previous.pots !== person.pots)
       )
         rank = i + 1;
-      const y = 319 + i * 60;
+      if (i >= 5 && i !== report.standings.length - 1) return "";
+      const y = 327 + Math.min(i, 5) * 68;
       return (
-        (i === 0 ? rect(40, y - 31, 1120, 54, INK) : "") +
+        (i > 5
+          ? `<path d="M40 ${y - 43} ${"l8 4 8 -4 ".repeat(70)}" fill="none" stroke="${INK}" stroke-width="1"/>`
+          : i > 1
+            ? rule(y - 43)
+            : "") +
+        (i === 0 ? rect(40, y - 39, 1120, 64, INK) : "") +
         text(String(rank).padStart(2, "0"), 62, y + 4, TYPE.body, {
           mono: true,
           color: i === 0 ? YELLOW : INK,
         }) +
-        standingCells(person, y + 4, i === 0) +
-        (i > 0 ? rule(y + 25) : "")
+        standingCells(person, y + 4, i === 0)
       );
     })
     .join("");
@@ -442,29 +444,16 @@ export function renderCoffeeLeaderboard(report: CoffeeReport): Buffer {
         text(title, x, 272, TYPE.label, { mono: true, align: "end" }),
       )
       .join("");
-  const nextBrewer = report.standings.at(-1);
-  const tied =
-    nextBrewer && report.standings.at(-2)?.balance === nextBrewer.balance;
-  const nextPot = nextBrewer
-    ? text(
-        `NEXT POT’S ON…${tied ? " (TIED LOWEST BALANCE)" : ""}`,
-        40,
-        612,
-        TYPE.label,
-        { mono: true },
-      ) + standingCells(nextBrewer, 648)
-    : "";
-  const note =
-    report.participants > 5
-      ? `Top 5 of ${report.participants} participants. `
-      : "";
   return frame(
     report,
     YELLOW,
     "KAFFI HEROES",
-    headings +
+    text(`${report.participants} PARTICIPANTS`, 1160, 222, TYPE.label, {
+      mono: true,
+      align: "end",
+    }) +
+      headings +
       rows +
-      nextPot +
       (report.participants
         ? ""
         : text(
@@ -475,15 +464,6 @@ export function renderCoffeeLeaderboard(report: CoffeeReport): Buffer {
             {
               width: 1060,
             },
-          )) +
-      text(
-        note +
-          "Ranked by balance, then pots brewed. Equal scores share a rank.",
-        40,
-        682,
-        TYPE.label,
-        { mono: true, width: 1120 },
-      ) +
-      text(BALANCE_RULE, 40, 713, TYPE.label, { mono: true, width: 1120 }),
+          )),
   );
 }
