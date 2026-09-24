@@ -21,6 +21,11 @@ static int s_retry_count;
 static esp_timer_handle_t s_retry_timer;
 static esp_timer_handle_t s_ip_watchdog;
 
+static char s_ssid[33];
+static char s_pass[65];
+static bool s_scanning;    // a directed scan we started is in flight
+static int s_scan_misses;  // consecutive directed scans that heard nothing
+
 static void schedule_retry() {
   int delay_ms = std::min(BASE_RETRY_MS * (1 << s_retry_count), MAX_RETRY_MS);
   s_retry_count++;
@@ -29,13 +34,97 @@ static void schedule_retry() {
   esp_timer_start_once(s_retry_timer, delay_ms * 1000LL);
 }
 
-static void attempt_connect(void *) {
-  ESP_LOGI(TAG, "Connecting (attempt %d)...", s_retry_count + 1);
+// Station config for the saved network. With a BSSID the driver skips its
+// own scan and goes straight to that AP on that channel.
+static void apply_sta_config(const uint8_t *bssid, uint8_t channel) {
+  wifi_config_t cfg = {};
+  std::memcpy(cfg.sta.ssid, s_ssid,
+              std::min(strlen(s_ssid), sizeof(cfg.sta.ssid)));
+  std::memcpy(cfg.sta.password, s_pass,
+              std::min(strlen(s_pass), sizeof(cfg.sta.password)));
+  cfg.sta.threshold.authmode =
+      s_pass[0] ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
+  cfg.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
+  if (bssid) {
+    std::memcpy(cfg.sta.bssid, bssid, sizeof(cfg.sta.bssid));
+    cfg.sta.bssid_set = true;
+    cfg.sta.channel = channel;
+  }
+  esp_wifi_set_config(WIFI_IF_STA, &cfg);
+}
+
+static void connect_now() {
   esp_err_t err = esp_wifi_connect();
   if (err != ESP_OK) {
     // A synchronous failure never produces a DISCONNECTED event, so the
     // retry chain would die here without this.
     ESP_LOGW(TAG, "esp_wifi_connect: %s", esp_err_to_name(err));
+    schedule_retry();
+  }
+}
+
+// A hidden SSID never beacons its name, and the driver's own connect-time
+// scan gives each channel so little time that it routinely misses the probe
+// response — reason 201 and a long backoff, over and over. Ask for the
+// network by name with a generous dwell, then connect to the exact BSSID and
+// channel we heard. Works the same for visible networks.
+static void attempt_connect(void *) {
+  ESP_LOGI(TAG, "Connecting (attempt %d)...", s_retry_count + 1);
+
+  wifi_scan_config_t sc = {};
+  sc.ssid = reinterpret_cast<uint8_t *>(s_ssid);
+  sc.show_hidden = true;
+  sc.scan_type = WIFI_SCAN_TYPE_ACTIVE;
+  sc.scan_time.active.min = 100;
+  sc.scan_time.active.max = 400;
+
+  esp_err_t err = esp_wifi_scan_start(&sc, false);
+  if (err != ESP_OK) {
+    ESP_LOGW(TAG, "Directed scan failed (%s) — connecting blind",
+             esp_err_to_name(err));
+    apply_sta_config(nullptr, 0);
+    connect_now();
+    return;
+  }
+  s_scanning = true;
+}
+
+static void on_scan_done() {
+  if (!s_scanning)
+    return; // not our scan
+  s_scanning = false;
+
+  // The scan was filtered by SSID, so every record is our network — pick the
+  // strongest. Hidden APs may report an empty name; that's still a match.
+  uint16_t n = 0;
+  esp_wifi_scan_get_ap_num(&n);
+  wifi_ap_record_t recs[8];
+  if (n > 8)
+    n = 8;
+  if (n == 0)
+    esp_wifi_clear_ap_list(); // get_ap_records would have freed it
+  else
+    esp_wifi_scan_get_ap_records(&n, recs);
+
+  int best = -1;
+  for (int i = 0; i < n; i++)
+    if (best < 0 || recs[i].rssi > recs[best].rssi)
+      best = i;
+
+  if (best >= 0) {
+    s_scan_misses = 0;
+    ESP_LOGI(TAG, "Found %s on ch %d (rssi %d)", s_ssid, recs[best].primary,
+             recs[best].rssi);
+    apply_sta_config(recs[best].bssid, recs[best].primary);
+    connect_now();
+  } else if (++s_scan_misses % 3 == 0) {
+    // Not hearing the AP isn't proof it's gone — let the driver try on its
+    // own every third time.
+    ESP_LOGW(TAG, "%s not found by scan — trying a blind connect", s_ssid);
+    apply_sta_config(nullptr, 0);
+    connect_now();
+  } else {
+    ESP_LOGW(TAG, "%s not found by scan", s_ssid);
     schedule_retry();
   }
 }
@@ -50,12 +139,15 @@ static void ip_watchdog_cb(void *) {
 static void on_wifi_event(void *, esp_event_base_t, int32_t id, void *data) {
   if (id == WIFI_EVENT_STA_START) {
     attempt_connect(nullptr);
+  } else if (id == WIFI_EVENT_SCAN_DONE) {
+    on_scan_done();
   } else if (id == WIFI_EVENT_STA_CONNECTED) {
     esp_timer_stop(s_ip_watchdog);
     esp_timer_start_once(s_ip_watchdog, IP_WAIT_MS * 1000LL);
   } else if (id == WIFI_EVENT_STA_DISCONNECTED) {
     auto *info = static_cast<wifi_event_sta_disconnected_t *>(data);
     ESP_LOGW(TAG, "Disconnected (reason %d)", info->reason);
+    s_scanning = false;
     esp_timer_stop(s_ip_watchdog);
     esp_event_post(APP_EVENT, APP_EVENT_WIFI_DISCONNECTED, nullptr, 0, 0);
 
@@ -112,28 +204,17 @@ void wifi_manager_init() {
   };
   ESP_ERROR_CHECK(esp_timer_create(&wd_args, &s_ip_watchdog));
 
-  char ssid[33] = {};
-  char pass[65] = {};
-  settings_get_wifi_ssid(ssid, sizeof(ssid));
-  settings_get_wifi_pass(pass, sizeof(pass));
+  settings_get_wifi_ssid(s_ssid, sizeof(s_ssid));
+  settings_get_wifi_pass(s_pass, sizeof(s_pass));
 
-  if (ssid[0] == '\0') {
+  if (s_ssid[0] == '\0') {
     ESP_LOGW(TAG, "No SSID configured — set via menuconfig or NVS");
     return;
   }
 
-  wifi_config_t wifi_cfg = {};
-  std::memcpy(wifi_cfg.sta.ssid, ssid,
-              std::min(strlen(ssid), sizeof(wifi_cfg.sta.ssid)));
-  std::memcpy(wifi_cfg.sta.password, pass,
-              std::min(strlen(pass), sizeof(wifi_cfg.sta.password)));
-  wifi_cfg.sta.threshold.authmode =
-      pass[0] ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
-  wifi_cfg.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
-
   ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-  ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg));
+  apply_sta_config(nullptr, 0);
   ESP_ERROR_CHECK(esp_wifi_start());
 
-  ESP_LOGI(TAG, "STA init — SSID: %s", ssid);
+  ESP_LOGI(TAG, "STA init — SSID: %s", s_ssid);
 }
