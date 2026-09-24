@@ -1,5 +1,6 @@
 #include "app_config.h"
 #include "kaffi/ota.h"
+#include "kaffi/pending.h"
 #include "kaffi/prefs.h"
 #include "kaffi/sanity_api.h"
 #include "ui/ui.h"
@@ -39,7 +40,7 @@ ESP_EVENT_DEFINE_BASE(APP_EVENT);
 // ─── Command queue: all HTTP runs on one task with a big stack (TLS heavy)
 
 struct Cmd {
-  enum class Type { Log, Refresh, OtaCheck } type;
+  enum class Type { Log, Flush, Refresh, OtaCheck } type;
   KaffiLogCmd log;
 };
 
@@ -48,8 +49,57 @@ static QueueHandle_t s_avatar_queue = nullptr;
 static esp_timer_handle_t s_refresh_timer = nullptr;
 static bool s_net_ready = false;   // one-time network init done
 static bool s_have_people = false; // at least one successful fetch
+static bool s_wifi_up = false;     // associated with an IP right now
 
 static void enqueue(Cmd cmd);
+
+// Offline pill on the list screen: what the network is doing and how many
+// taps are waiting for it.
+static void publish_link_state() {
+  ui_set_offline(!s_wifi_up, kaffi_pending_count());
+}
+
+// Replay undelivered taps, oldest first, stopping at the first failure so
+// order is preserved. Returns how many landed.
+static int flush_pending() {
+  int sent = 0;
+  while (const PendingEvent *e = kaffi_pending_front()) {
+    if (!sanity_api_log(e->person_id, e->person_name, e->kind, e->quantity,
+                        e->occurred_at))
+      break;
+    kaffi_pending_pop();
+    sent++;
+  }
+  if (sent)
+    ESP_LOGI(TAG, "Replayed %d queued event(s), %d left", sent,
+             kaffi_pending_count());
+  publish_link_state();
+  return sent;
+}
+
+// A tap that can't be delivered right now is queued, never dropped. The UI
+// has already buzzed and toasted, so from the coffee machine nothing changes;
+// the pill shows the backlog until the network comes back.
+static void log_or_queue(const KaffiLogCmd &log) {
+  char occ[32] = {};
+  sanity_api_iso_now(occ, sizeof(occ));
+  bool ok = s_wifi_up && kaffi_pending_count() == 0 &&
+            sanity_api_log(log.person_id, log.person_name, log.kind,
+                           log.quantity, occ);
+  if (ok)
+    return;
+  PendingEvent e = {};
+  strncpy(e.person_id, log.person_id, sizeof(e.person_id) - 1);
+  strncpy(e.person_name, log.person_name, sizeof(e.person_name) - 1);
+  e.kind = log.kind;
+  e.quantity = log.quantity;
+  strncpy(e.occurred_at, occ, sizeof(e.occurred_at) - 1);
+  kaffi_pending_push(e);
+  ESP_LOGW(TAG, "Queued %s for %s (%d pending)",
+           log.kind == KAFFI_BREW ? "brew" : "cup", log.person_name,
+           kaffi_pending_count());
+  publish_link_state();
+}
 
 static void cmd_task(void *) {
   Cmd cmd;
@@ -59,9 +109,15 @@ static void cmd_task(void *) {
 
     switch (cmd.type) {
     case Cmd::Type::Log:
-      sanity_api_log(cmd.log.person_id, cmd.log.person_name, cmd.log.kind,
-                     cmd.log.quantity);
-      sanity_api_fetch_people(); // reflect the new total
+      log_or_queue(cmd.log);
+      if (s_wifi_up) {
+        flush_pending();            // older taps go out first
+        sanity_api_fetch_people(); // reflect the new total
+      }
+      break;
+    case Cmd::Type::Flush:
+      if (s_wifi_up && flush_pending() > 0)
+        sanity_api_fetch_people();
       break;
     case Cmd::Type::Refresh:
       if (!sanity_api_fetch_people() && !s_have_people) {
@@ -116,6 +172,8 @@ static void enqueue(Cmd cmd) {
 // slow) is queued onto the command task.
 static void on_wifi_connected(void *, esp_event_base_t, int32_t, void *) {
   ESP_LOGI(TAG, "WiFi connected");
+  s_wifi_up = true;
+  publish_link_state();
   if (!s_net_ready) {
     s_net_ready = true;
     esp_sntp_config_t sntp_cfg = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
@@ -130,6 +188,11 @@ static void on_wifi_connected(void *, esp_event_base_t, int32_t, void *) {
   if (!s_have_people)
     ui_set_status("Loading people...");
 
+  // Anything queued while offline goes out before the refresh so the new
+  // totals include it.
+  Cmd flush;
+  flush.type = Cmd::Type::Flush;
+  enqueue(flush);
   Cmd cmd;
   cmd.type = Cmd::Type::Refresh;
   enqueue(cmd);
@@ -137,6 +200,8 @@ static void on_wifi_connected(void *, esp_event_base_t, int32_t, void *) {
 
 static void on_wifi_disconnected(void *, esp_event_base_t, int32_t, void *) {
   ESP_LOGW(TAG, "WiFi disconnected");
+  s_wifi_up = false;
+  publish_link_state();
   // With people already loaded the knob keeps working from memory — a blip
   // shouldn't yank the screen away. Reconnect refetches in the background.
   if (!s_have_people)
@@ -166,6 +231,12 @@ static void on_log(void *, esp_event_base_t, int32_t, void *data) {
 }
 
 static void on_refresh(void *, esp_event_base_t, int32_t, void *) {
+  // The periodic refresh doubles as a retry tick for the queue.
+  if (kaffi_pending_count() > 0) {
+    Cmd flush;
+    flush.type = Cmd::Type::Flush;
+    enqueue(flush);
+  }
   Cmd cmd;
   cmd.type = Cmd::Type::Refresh;
   enqueue(cmd);
@@ -216,6 +287,7 @@ extern "C" void app_main() {
 
   init_nvs();
   settings_init();
+  kaffi_pending_init();
 
   s_cmd_queue = xQueueCreate(8, sizeof(Cmd));
   xTaskCreatePinnedToCore(cmd_task, "kaffi_cmd", 8192, nullptr, 5, nullptr, 1);
@@ -245,6 +317,7 @@ extern "C" void app_main() {
 
   ui_init();
   ui_show_splash();
+  publish_link_state(); // show any backlog restored from NVS right away
   haptic_init();
   encoder_init();
 
