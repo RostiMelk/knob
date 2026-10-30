@@ -1,8 +1,10 @@
-// Mirrors the knob: balance = brew credit - cups. The first pot of a brew
-// event is worth 4 cups; extra pots in the same event only 2 each (brewing
-// a second pot is barely more hassle once you're already at it).
+// Mirrors the knob: balance = brew and run credit - cups. The first pot of
+// a brew event is worth 4 cups; extra pots in the same event only 2 each
+// (brewing a second pot is barely more hassle once you're already at it).
+// A coffee run, fetching coffee for the office, is worth 10.
 export const FIRST_POT_CUPS = 4;
 export const EXTRA_POT_CUPS = 2;
+export const RUN_CUPS = 10;
 
 export function brewCredit(pots: number) {
   if (pots <= 0) return 0;
@@ -12,7 +14,7 @@ export function brewCredit(pots: number) {
 export type EventRow = {
   personId: string;
   personName?: string;
-  kind: "brew" | "cup";
+  kind: "brew" | "cup" | "run";
   quantity: number;
   office?: string;
 };
@@ -29,6 +31,7 @@ export type Standing = {
   name: string;
   pots: number;
   cups: number;
+  runs: number;
   credit: number;
   balance: number;
 };
@@ -43,6 +46,7 @@ export function aggregate(events: readonly EventRow[]): Standing[] {
         name: ev.personName || "Unknown",
         pots: 0,
         cups: 0,
+        runs: 0,
         credit: 0,
         balance: 0,
       };
@@ -51,6 +55,9 @@ export function aggregate(events: readonly EventRow[]): Standing[] {
     if (ev.kind === "brew") {
       s.pots += ev.quantity ?? 1;
       s.credit += brewCredit(ev.quantity ?? 1);
+    } else if (ev.kind === "run") {
+      s.runs += ev.quantity ?? 1;
+      s.credit += RUN_CUPS * (ev.quantity ?? 1);
     } else if (ev.kind === "cup") {
       s.cups += ev.quantity ?? 1;
     }

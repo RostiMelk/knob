@@ -28,6 +28,27 @@ const event = (overrides: Partial<CoffeeEvent> = {}): CoffeeEvent => ({
   ...overrides,
 });
 
+test("a coffee run is worth ten cups and stays out of the pots/cups chart", () => {
+  const report = buildCoffeeReport(
+    [
+      event({ kind: "run" }),
+      event({ kind: "cup", quantity: 2 }),
+      event({ personId: "jo", personName: "Jo Chen" }),
+    ],
+    options,
+  );
+  expect(report.standings[0]).toMatchObject({
+    personId: "alex",
+    runs: 1,
+    pots: 0,
+    cups: 2,
+    credit: 10,
+    balance: 8,
+  });
+  expect([report.pots, report.cups]).toEqual([1, 2]);
+  expect(report.buckets.reduce((sum, bucket) => sum + bucket.pots, 0)).toBe(1);
+});
+
 test("office-local periods preserve brew-action credits, names, and empty days", () => {
   const report = buildCoffeeReport(
     [

@@ -98,7 +98,7 @@ static void log_or_queue(const KaffiLogCmd &log) {
   sanity_api_iso_now(e.occurred_at, sizeof(e.occurred_at));
   kaffi_pending_push(e);
   ESP_LOGW(TAG, "Queued %s for %s (%d pending)",
-           log.kind == KAFFI_BREW ? "brew" : "cup", log.person_name,
+           kaffi_kind_name(log.kind), log.person_name,
            kaffi_pending_count());
   publish_link_state();
 }

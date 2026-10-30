@@ -413,19 +413,27 @@ static int aggregate_events(const char *json, KaffiState *st, DayBits *days,
           if (strcmp(st->people[i].id, pid) != 0)
             continue;
           Person *pe = &st->people[i];
+          bool made = false;
           if (strcmp(kind, "brew") == 0) {
             pe->pots += qty;
             pe->credit += kaffi_brew_credit(qty);
-            // Only brews feed the streak — it rewards making coffee, not
-            // drinking it.
+            made = true;
+          } else if (strcmp(kind, "run") == 0) {
+            pe->runs += qty;
+            pe->credit += KAFFI_RUN_CUPS * qty;
+            made = true;
+          } else if (strcmp(kind, "cup") == 0) {
+            pe->cups += qty;
+          }
+          // Only brews and runs feed the streak — it rewards making coffee
+          // happen, not drinking it.
+          if (made) {
             time_t t;
             if (today >= 0 && at[0] && parse_iso_utc(at, &t)) {
               long ago = today - local_daynum(t);
               if (ago >= 0 && ago < STREAK_DAYS)
                 days[i][ago / 32] |= 1u << (ago % 32);
             }
-          } else if (strcmp(kind, "cup") == 0) {
-            pe->cups += qty;
           }
           break;
         }
@@ -662,7 +670,7 @@ bool sanity_api_log(const char *event_id, const char *person_id,
                     const char *occurred_at) {
   if (!event_id || !event_id[0])
     return false;
-  const char *kind_str = (kind == KAFFI_BREW) ? "brew" : "cup";
+  const char *kind_str = kaffi_kind_name(kind);
 
   char occ[32];
   if (occurred_at && occurred_at[0])

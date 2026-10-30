@@ -21,6 +21,7 @@ import {
   officeOf,
   FIRST_POT_CUPS,
   EXTRA_POT_CUPS,
+  RUN_CUPS,
   type EventRow,
 } from "../../lib/coffee-stats";
 
@@ -86,8 +87,8 @@ export function LeaderboardTool() {
           </Text>
           <Text size={1} muted>
             This year — a brew is worth {FIRST_POT_CUPS} cups (+{EXTRA_POT_CUPS}{" "}
-            for a second pot), minus cups taken. Live from the event log; names
-            and photos come from Sanity Home.
+            for a second pot) and a coffee run {RUN_CUPS}, minus cups taken.
+            Live from the event log; names and photos come from Sanity Home.
           </Text>
         </Stack>
 
@@ -142,6 +143,8 @@ export function LeaderboardTool() {
                       {person?.name ?? s.name}
                     </Text>
                     <Text size={1} muted>
+                      {s.runs > 0 &&
+                        `${s.runs} ${s.runs === 1 ? "run" : "runs"} · `}
                       {s.pots} {s.pots === 1 ? "pot" : "pots"} · {s.cups}{" "}
                       {s.cups === 1 ? "cup" : "cups"}
                     </Text>
