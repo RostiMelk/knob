@@ -66,8 +66,13 @@ void standing_text(int balance, char *out, size_t len) {
 }
 
 void stats_text(const Person &p, char *out, size_t len) {
-  snprintf(out, len, "%d %s, %d %s", p.pots, p.pots == 1 ? "pot" : "pots",
-           p.cups, p.cups == 1 ? "cup" : "cups");
+  int n = 0;
+  if (p.runs > 0)
+    n = snprintf(out, len, "%d %s, ", p.runs, p.runs == 1 ? "run" : "runs");
+  if (n < 0 || static_cast<size_t>(n) >= len)
+    return;
+  snprintf(out + n, len - n, "%d %s, %d %s", p.pots,
+           p.pots == 1 ? "pot" : "pots", p.cups, p.cups == 1 ? "cup" : "cups");
 }
 
 // Latin-1 letters come as two UTF-8 bytes; their capitals are 0x20 below.
@@ -87,7 +92,8 @@ void initial_of(const char *name, char *out, size_t len) {
 int leaderboard_order(const KaffiState &state, int *order) {
   int n = 0;
   for (int i = 0; i < state.count; i++)
-    if (state.people[i].pots > 0 || state.people[i].cups > 0)
+    if (state.people[i].pots > 0 || state.people[i].cups > 0 ||
+        state.people[i].runs > 0)
       order[n++] = i;
   auto balance = [&](int i) {
     return state.people[i].credit - state.people[i].cups;
@@ -107,10 +113,12 @@ const char *log_toast(const Person &p, int kind, int qty, bool weekday) {
                                      "Drink up!"};
   static const char *const POTS[] = {"What a hero!", "Fresh pot!",
                                      "Legend move", "Brewtiful!"};
+  static const char *const RUNS[] = {"Coffee run hero!", "Errand legend",
+                                     "Run, hero, run!", "Delivered!"};
   static unsigned turn;
   static char streak[24];
   turn++;
-  if (kind != KAFFI_BREW)
+  if (kind == KAFFI_CUP)
     return CUPS[turn % 4];
   if (!p.brewed_today && p.streak + 1 >= 2) {
     bool saved = p.streak >= 2 && weekday;
@@ -118,5 +126,7 @@ const char *log_toast(const Person &p, int kind, int qty, bool weekday) {
              p.streak + 1);
     return streak;
   }
+  if (kind == KAFFI_RUN)
+    return RUNS[turn % 4];
   return qty == 2 ? "Double hero!" : POTS[turn % 4];
 }

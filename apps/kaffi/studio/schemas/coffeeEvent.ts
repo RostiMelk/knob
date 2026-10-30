@@ -25,6 +25,7 @@ export const coffeeEvent = defineType({
         list: [
           { title: "Brewed a pot", value: "brew" },
           { title: "Took a cup", value: "cup" },
+          { title: "Went on a coffee run", value: "run" },
         ],
       },
       initialValue: "cup",
@@ -55,7 +56,7 @@ export const coffeeEvent = defineType({
     defineField({
       name: "quantity",
       type: "number",
-      description: "Pots (1 or 2) for a brew, cups for a cup.",
+      description: "Pots (1 or 2) for a brew, cups for a cup, runs for a run.",
       initialValue: 1,
       validation: (rule) => rule.required().min(1).integer(),
     }),
@@ -92,16 +93,19 @@ export const coffeeEvent = defineType({
     prepare: ({ kind, quantity, person, occurredAt }) => {
       const count = quantity ?? 1;
       const who = person ?? "Someone";
-      const noun = kind === "brew" ? "pot" : "cup";
-      const verb = kind === "brew" ? "brewed" : "took";
+      const noun =
+        kind === "brew" ? "pot" : kind === "run" ? "coffee run" : "cup";
+      const verb =
+        kind === "brew" ? "brewed" : kind === "run" ? "went on" : "took";
       return {
         title: `${who} ${verb} ${count} ${noun}${count === 1 ? "" : "s"}`,
         subtitle: occurredAt
           ? new Date(occurredAt).toLocaleString()
           : undefined,
-        // Semantic, not literal: a brew adds to the office coffee pool, a
-        // cup takes from it — mirrors the balance math (pots × 2 − cups).
-        media: kind === "brew" ? AddCircleIcon : RemoveCircleIcon,
+        // Semantic, not literal: a brew or a run adds to the office coffee
+        // pool, a cup takes from it — mirrors the balance math.
+        media:
+          kind === "brew" || kind === "run" ? AddCircleIcon : RemoveCircleIcon,
       };
     },
   },

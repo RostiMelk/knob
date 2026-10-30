@@ -22,7 +22,12 @@ static constexpr int KAFFI_URL_LEN = 200;
 static constexpr int KAFFI_PHOTO_PX = 132;
 
 // ─── Coffee action kinds
-enum KaffiKind { KAFFI_CUP = 0, KAFFI_BREW = 1 };
+enum KaffiKind { KAFFI_CUP = 0, KAFFI_BREW = 1, KAFFI_RUN = 2 };
+
+// The `kind` string stored on coffeeEvent documents.
+inline const char *kaffi_kind_name(int kind) {
+  return kind == KAFFI_BREW ? "brew" : kind == KAFFI_RUN ? "run" : "cup";
+}
 
 // ─── Offices — name doubles as the directory location filter (GROQ `match`,
 // so "San Francisco" also catches people who typed a full address) and the
@@ -35,10 +40,13 @@ struct KaffiOffice {
   const char *code; // capitals only
   uint32_t tile;
   uint32_t sky;
+  // The log sheet's third row: a coffee run where people mostly brew a
+  // single pot, else a second pot.
+  bool coffee_run;
 };
 static constexpr KaffiOffice KAFFI_OFFICES[] = {
-    {"Oslo", "CET-1CEST,M3.5.0,M10.5.0/3", "OSL", 0x4E5B82, 0x141A2C},
-    {"San Francisco", "PST8PDT,M3.2.0,M11.1.0", "SFO", 0xC8642A, 0x2E1C0A},
+    {"Oslo", "CET-1CEST,M3.5.0,M10.5.0/3", "OSL", 0x4E5B82, 0x141A2C, false},
+    {"San Francisco", "PST8PDT,M3.2.0,M11.1.0", "SFO", 0xC8642A, 0x2E1C0A, true},
 };
 static constexpr int KAFFI_OFFICE_COUNT =
     sizeof(KAFFI_OFFICES) / sizeof(KAFFI_OFFICES[0]);
@@ -50,9 +58,10 @@ struct Person {
   char image_url[KAFFI_URL_LEN]; // small JPEG URL, or empty
   int pots;
   int cups;
-  int credit;        // cups "paid for" by brews (diminishing per-event returns)
-  int streak;        // consecutive brew days; quiet weekends don't break it
-  bool brewed_today; // brewed at least one pot today (local time)
+  int runs;          // coffee runs: fetched coffee for the office
+  int credit;        // cups "paid for" by brews and runs
+  int streak;        // consecutive brew or run days; quiet weekends don't break it
+  bool brewed_today; // brewed a pot or went on a run today (local time)
 };
 
 // ─── Snapshot of all people, posted to the UI on each refresh
@@ -67,7 +76,7 @@ struct KaffiLogCmd {
   char
       person_name[KAFFI_NAME_LEN]; // denormalized for readability in the studio
   int32_t kind;                    // KaffiKind
-  int32_t quantity;                // pots (1-2) or cups (1)
+  int32_t quantity;                // pots (1-2), cups (1) or runs (1)
 };
 
 // ─── UI asks the command task to fetch+decode an avatar (keyed by URL, which
@@ -98,6 +107,9 @@ inline int kaffi_brew_credit(int pots) {
     return 0;
   return KAFFI_FIRST_POT_CUPS + (pots - 1) * KAFFI_EXTRA_POT_CUPS;
 }
+
+// A coffee run (fetching coffee for the office) is worth 10 cups.
+static constexpr int KAFFI_RUN_CUPS = 10;
 
 // ─── Timing
 static constexpr int KAFFI_HTTP_TIMEOUT_MS = 8000;

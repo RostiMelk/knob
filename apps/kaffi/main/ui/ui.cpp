@@ -9,6 +9,7 @@
 #include "fonts.h"
 #include "hal_pins.h"
 #include "haptic.h"
+#include "kaffi/prefs.h"
 #include "primitives.h"
 #include "sheet.h"
 #include "sheet_list.h"
@@ -328,15 +329,20 @@ void log_for_selected(int kind, int qty) {
 
   const char *toast = log_toast(p, kind, qty, is_weekday_today());
   // Shown at once; the next fetch confirms it.
-  if (kind == KAFFI_BREW) {
-    p.pots += qty;
-    p.credit += kaffi_brew_credit(qty);
+  if (kind == KAFFI_CUP) {
+    p.cups += qty;
+  } else {
+    if (kind == KAFFI_RUN) {
+      p.runs += qty;
+      p.credit += KAFFI_RUN_CUPS * qty;
+    } else {
+      p.pots += qty;
+      p.credit += kaffi_brew_credit(qty);
+    }
     if (!p.brewed_today) {
       p.brewed_today = true;
       p.streak++;
     }
-  } else {
-    p.cups += qty;
   }
   show_person();
   show_toast(toast);
@@ -357,11 +363,19 @@ void close_sheet(lv_event_t *) {
     sheet_close(sheet);
 }
 
+bool office_has_coffee_run() {
+  int office = kaffi_office_get();
+  return office >= 0 && office < KAFFI_OFFICE_COUNT &&
+         KAFFI_OFFICES[office].coffee_run;
+}
+
 void on_log_row(lv_event_t *e) {
   auto row =
       static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
   if (row == 0)
     log_for_selected(KAFFI_CUP, 1);
+  else if (row == 2 && office_has_coffee_run())
+    log_for_selected(KAFFI_RUN, 1);
   else
     log_for_selected(KAFFI_BREW, row);
 }
@@ -377,9 +391,11 @@ void build_log() {
     const char *text;
     int change;
   };
-  const Choice choices[] = {{"Took a cup", -1},
-                            {"Brewed a pot", kaffi_brew_credit(1)},
-                            {"Brewed two pots", kaffi_brew_credit(2)}};
+  const Choice choices[] = {
+      {"Took a cup", -1},
+      {"Brewed a pot", kaffi_brew_credit(1)},
+      office_has_coffee_run() ? Choice{"Coffee run", KAFFI_RUN_CUPS}
+                              : Choice{"Brewed two pots", kaffi_brew_credit(2)}};
   for (int i = 0; i < 3; i++) {
     lv_obj_t *row = ui_list_row(s_log_list, choices[i].text, false);
     char change[16];

@@ -134,16 +134,18 @@ export function buildCoffeeReport(
     if (day < from || day >= to) continue;
     if (
       !event.personId ||
-      !["brew", "cup"].includes(event.kind) ||
+      !["brew", "cup", "run"].includes(event.kind) ||
       !Number.isSafeInteger(event.quantity) ||
       event.quantity < 1
     )
       throw new Error(
-        "Coffee events need a personId, brew/cup kind, and positive integer quantity",
+        "Coffee events need a personId, brew/cup/run kind, and positive integer quantity",
       );
     const bucket = buckets.get(bucketKey(day));
     if (!bucket) throw new Error("Event falls outside the report buckets");
-    bucket[event.kind === "brew" ? "pots" : "cups"] += event.quantity;
+    // The chart plots pots against cups; a run only moves the balance.
+    if (event.kind !== "run")
+      bucket[event.kind === "brew" ? "pots" : "cups"] += event.quantity;
     selected.push(event);
   }
   // Latest snapshot wins regardless of the query's ordering.
